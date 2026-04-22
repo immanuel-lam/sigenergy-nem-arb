@@ -1,0 +1,31 @@
+[project]
+name = "sigenergy-nem-arb"
+version = "0.1.0"
+description = "Autonomous battery arbitrage agent for Sigenergy + AEMO NEM"
+requires-python = ">=3.12"
+dependencies = [
+    "pandas>=2.2",
+    "requests>=2.31",
+    "pymodbus>=3.6",
+    "python-dotenv>=1.0",
+    "anthropic>=0.40",
+    "streamlit>=1.35",
+    "plotly>=5.22",
+    "pulp>=2.8",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0",
+    "ruff>=0.4",
+]
+
+[tool.ruff]
+line-length = 99
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "W"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
