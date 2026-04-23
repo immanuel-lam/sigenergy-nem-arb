@@ -36,11 +36,39 @@ The Amber comparison is reconstructed from HA history (`arb/eval/amber_replay.py
 
 FastAPI backend on port 8000, Next.js dashboard on port 3000. Both read the same persisted plan and logs the agent loop writes — no separate data store.
 
-Dashboard panels: SOC gauge, 24h price and action chart, current status strip, rationale feed, backtest results table, sensor data quality pills. The "Inject synthetic spike" button calls `POST /spike-demo`, which runs the greedy scheduler against a synthetic 120 c/kWh price spike and returns both plans. The diff and the re-plan animation appear below without a page reload.
+### Starting it
 
-`http://localhost:3000/replan` is a standalone full-viewport page that loops the re-plan animation. Use it for demo b-roll — space bar replays it.
+Two terminals:
 
-`docs/report.html` (269 KB) is the submission-grade HTML artifact: backtest results, architecture walkthrough, and Opus 4.7 prose explanation. Open it in a browser; no server needed.
+```bash
+# Terminal 1 — backend
+cd /path/to/sigenergy-nem-arb
+source .venv/bin/activate
+uvicorn arb.api.server:app --port 8000
+
+# Terminal 2 — frontend
+cd web
+NEXT_PUBLIC_API_BASE=http://localhost:8000 npm run dev
+```
+
+Open http://localhost:3000.
+
+### What the dashboard shows (top to bottom)
+
+1. **Header strip** — live Sydney clock, DRY_RUN badge, sensor health dot.
+2. **SOC gauge** — current battery state of charge with floor (10%) and ceiling (95%) marked. Colored band tells you how close to either limit.
+3. **24h price + action chart** — import price (amber line) and export price (rose line, filled when negative). Shaded bands show the agent's planned action per interval: cyan = charge from grid, green = discharge, violet = hold solar, dim slate = idle.
+4. **Current interval status** — the action the agent is taking RIGHT NOW, current import/export price, countdown to the next scheduled re-plan.
+5. **Rationale feed** — last 5 decisions, each with the timestamp, the action, and the 2-sentence Opus 4.7 explanation.
+6. **Signature animation slot** — empty until you click the spike demo button. Then the 8-second re-plan animation plays here.
+7. **Backtest table** — agent vs self-consume vs static TOU vs Amber SmartShift actual. Agent row has a cyan glow.
+8. **Data quality** — a pill per source (HA, Amber, AEMO, BOM, Modbus). Hover for the specific warning if one turns amber/red.
+
+### Interactive moves
+
+- **"Inject synthetic spike"** button (top-right): POSTs `/spike-demo` to the backend. Runs the greedy scheduler twice — once normally, once with a synthetic +120 c/kWh export spike injected 10 min in the future. The response has both plans, and the `<ReplanSection>` below plays the signature animation showing the agent react. This is THE demo moment.
+- **`/replan` page** (standalone): http://localhost:3000/replan. Full-viewport, dark, no header. Loops the re-plan animation every ~10 seconds. Press space to replay immediately. Use for b-roll in the video.
+- **Static report**: open `docs/report.html` directly in a browser (no server needed). It's a 269 KB single-page document with the backtest, architecture, and Opus 4.7-authored prose. This is a submission artifact — link it from your hackathon entry.
 
 ## Architecture
 

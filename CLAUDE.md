@@ -373,12 +373,22 @@ Shipped: 73 tests. Live cycle end-to-end: Plan diff `NO_CHANGE`, Audit `status=o
 ### Day 5 — Apr 27: Polish + demo + submit
 
 - Record the 60-second video per `docs/demo_script.md` shot list
-- Fill in `docs/postmortem_template.md` — pick one entry from `agent_rationale.log` or `offline_dryrun_rationale.log` where action changed and the delta is interesting
-- Final README pass
+- Fill in `docs/postmortem_template.md` — candidates in `docs/best_moments.md` (Sonnet did the triage)
 - **Stay in DRY_RUN for the recording.** Advisory mode is the whole point — we're not fighting Amber SmartShift for control. Annotate the video accordingly.
-- Submit.
+- Submit to hackathon portal with: repo URL, video link, brief description. Link `docs/report.html` as a submission artifact.
 
 **Success criteria:** submission URL returned.
+
+### What shipped beyond the original Day 4 scope (added 2026-04-23 afternoon)
+
+- **Price spike detection + mid-interval re-plan** (`arb/agent/spike_detector.py` + loop integration): continuous mode polls every 5 min between 30-min scheduled cycles, triggers full re-plan on CAP/MAJOR/MINOR deviations. 10-min cooldown. 10 tests.
+- **Synthetic spike demo** (`arb/agent/spike_demo.py`): reproducible video-ready injection. `--channel export --magnitude 120` produces HOLD_SOLAR -> CHARGE_GRID flip, 60 intervals changed.
+- **FastAPI backend** (`arb/api/server.py`): REST + WebSocket wrapper around the existing Python modules. 6 tests. Port 8000.
+- **Next.js 14 dashboard** (`web/`): custom dark theme (Inter + JetBrains Mono, Framer Motion, Recharts, SWR). Panels for SOC gauge, 24h price+action chart, current status, rationale feed, backtest table, data quality. Port 3000.
+- **Signature re-plan animation** (`web/components/replan/`): 8-second choreographed sequence driven by a single playhead. Standalone `/replan` page for b-roll.
+- **Static HTML report** (`docs/report.html`): 269 KB submission-grade single-page artifact with Opus 4.7-authored prose. Regenerate with `python -m arb.eval.generate_report`.
+- **Log triage** (`docs/best_moments.md`): Sonnet picked 3 candidates for the postmortem. Top pick: 08:30 UTC offline-dryrun moment where solar sensor went stale and the agent dropped HOLD_SOLAR to IDLE instead of fabricating.
+- **99 tests passing** (was 73 at end of Day 4 morning).
 
 ---
 
@@ -523,4 +533,4 @@ All Day 1-4 issues done. Kept for reference.
 
 ---
 
-*Last updated: 2026-04-23, end of Day 4. Day 5 remaining: record video, fill postmortem, final README pass, submit. 73 tests green, advisory-mode loop runs clean against Immanuel's house.*
+*Last updated: 2026-04-23 afternoon, after Day 4 + stretch features. Day 5 remaining: record video, fill postmortem, submit. 99 tests green. Backend on :8000, dashboard on :3000, advisory-mode loop runs clean against Immanuel's house. Full stack end-to-end verified.*
