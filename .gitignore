@@ -24,6 +24,10 @@ data/
 .DS_Store
 Thumbs.db
 
+# Runtime logs
+*.log
+!tests/**/*.log
+
 # Virtual env
 .venv/
 venv/

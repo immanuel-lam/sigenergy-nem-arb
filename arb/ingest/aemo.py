@@ -138,6 +138,27 @@ def fetch_5mpd_forecast() -> pd.DataFrame:
     return result
 
 
+def _parse_dispatch_csv(csv_text: str) -> pd.DataFrame:
+    """Parse AEMO DispatchIS CSV (table PRICE)."""
+    df = _extract_table(csv_text, "PRICE")
+    if df is None or df.empty:
+        return pd.DataFrame()
+
+    df = df[df["REGIONID"].str.strip() == REGION].copy()
+    if "INTERVENTION" in df.columns:
+        df = df[df["INTERVENTION"].str.strip() == "0"]
+
+    if df.empty:
+        return pd.DataFrame()
+
+    df["timestamp"] = pd.to_datetime(df["SETTLEMENTDATE"])
+    df["timestamp"] = df["timestamp"].dt.tz_localize("Australia/Sydney").dt.tz_convert("UTC")
+    df["rrp_mwh"] = pd.to_numeric(df["RRP"], errors="coerce")
+    df["rrp_c_kwh"] = df["rrp_mwh"] / 10.0
+    df["region"] = REGION
+    return df[["timestamp", "rrp_mwh", "rrp_c_kwh", "region"]].dropna().reset_index(drop=True)
+
+
 def fetch_dispatch_prices(lookback_hours: int = 24) -> pd.DataFrame:
     """Fetch recent actual dispatch prices (for backtest and comparison).
 
@@ -158,7 +179,7 @@ def fetch_dispatch_prices(lookback_hours: int = 24) -> pd.DataFrame:
         for name in csv_names:
             with zf.open(name) as f:
                 text = f.read().decode("utf-8", errors="replace")
-                df = _parse_5mpd_csv(text)
+                df = _parse_dispatch_csv(text)
                 if not df.empty:
                     all_dfs.append(df)
 
@@ -167,6 +188,7 @@ def fetch_dispatch_prices(lookback_hours: int = 24) -> pd.DataFrame:
 
     result = pd.concat(all_dfs, ignore_index=True)
     result = result.drop_duplicates(subset=["timestamp"]).sort_values("timestamp").reset_index(drop=True)
+    log.info("Dispatch prices: %d intervals", len(result))
     return result
 
 

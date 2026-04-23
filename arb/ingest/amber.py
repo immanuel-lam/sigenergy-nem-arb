@@ -112,6 +112,77 @@ def fetch_prices(site_id: str | None = None) -> pd.DataFrame:
     return result
 
 
+def fetch_historical_prices(
+    days: int = 7,
+    site_id: str | None = None,
+) -> pd.DataFrame:
+    """Fetch `days` of historical 5-min prices from Amber.
+
+    Uses /prices endpoint with startDate/endDate params. Returns same schema
+    as fetch_prices() plus an rrp_c_kwh column mirroring import_c_kwh for
+    backwards-compatible consumers.
+    """
+    if _api_key() is None:
+        log.info("No Amber API key, skipping historical")
+        return pd.DataFrame()
+
+    site_id = site_id or get_site_id()
+    if site_id is None:
+        return pd.DataFrame()
+
+    from datetime import date, timedelta
+    # Amber requires endDate to be in the past (not today)
+    end_date = date.today() - timedelta(days=1)
+    start_date = end_date - timedelta(days=days - 1)
+
+    url = f"{AMBER_API_BASE}/sites/{site_id}/prices"
+    params = {
+        "resolution": 5,
+        "startDate": start_date.isoformat(),
+        "endDate": end_date.isoformat(),
+    }
+
+    log.info("Fetching Amber historical: %s to %s", start_date, end_date)
+    resp = requests.get(url, headers=_headers(), params=params, timeout=60)
+    resp.raise_for_status()
+    data = resp.json()
+
+    if not data:
+        return pd.DataFrame()
+
+    rows = []
+    for entry in data:
+        ts = pd.to_datetime(entry.get("startTime"), utc=True)
+        channel = entry.get("channelType", "")
+        price = entry.get("perKwh", 0.0)
+        price_type = entry.get("type", "unknown")
+
+        if channel == "general":
+            rows.append({"timestamp": ts, "import_c_kwh": price, "price_type": price_type})
+        elif channel == "feedIn":
+            rows.append({"timestamp": ts, "export_c_kwh": price})
+
+    if not rows:
+        return pd.DataFrame()
+
+    df = pd.DataFrame(rows)
+    imports = df[df["import_c_kwh"].notna()][["timestamp", "import_c_kwh", "price_type"]]
+    exports = df[df["export_c_kwh"].notna()][["timestamp", "export_c_kwh"]]
+
+    if imports.empty:
+        return pd.DataFrame()
+
+    result = imports.merge(exports, on="timestamp", how="outer") if not exports.empty else imports
+    if "export_c_kwh" not in result.columns:
+        result["export_c_kwh"] = None
+    # Mirror for AEMO-style consumers
+    result["rrp_c_kwh"] = result["import_c_kwh"]
+    result = result.sort_values("timestamp").reset_index(drop=True)
+    log.info("Amber historical: %d intervals, %s to %s",
+             len(result), result["timestamp"].iloc[0], result["timestamp"].iloc[-1])
+    return result
+
+
 if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO)
     df = fetch_prices()

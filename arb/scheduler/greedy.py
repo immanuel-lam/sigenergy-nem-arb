@@ -56,9 +56,11 @@ def schedule(
     rte = battery.roundtrip_efficiency
     cycle_cost = battery.cycle_cost_c_per_kwh
 
-    # Vectorised: compute spread matrix. spread[c, d] = export[d] - import[c]
-    # Only consider d > c. Net value = spread * rte - cycle_cost.
-    # For n=288 this is ~41k pairs, fine to enumerate.
+    # Grid-export arbitrage: only trade when export price at d beats import at c
+    # enough to cover roundtrip losses and cycle cost. This is conservative by
+    # design — on tariffs like Amber with negative feed-in, the agent will find
+    # no profitable pairs and default to self-consume, which is near-optimal
+    # on a solar-rich house.
     pairs: list[tuple[int, int, float]] = []
     for c in range(n):
         for d in range(c + 1, n):

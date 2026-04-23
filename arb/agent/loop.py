@@ -5,7 +5,9 @@ import argparse
 import logging
 import os
 from datetime import datetime, timezone
+from pathlib import Path
 
+from arb.agent.explain import explain_plan
 from arb.forecast.builder import build_forecast
 from arb.ingest.snapshot import take_snapshot
 from arb.scheduler.constants import INTERVAL_MIN, BatteryConstants
@@ -16,6 +18,7 @@ log = logging.getLogger(__name__)
 
 DRY_RUN = os.getenv("DRY_RUN", "true").lower() in ("true", "1", "yes")
 KILL_SWITCH = os.getenv("ARB_KILL", "0") == "1"
+RATIONALE_LOG = Path(os.getenv("ARB_RATIONALE_LOG", "agent_rationale.log"))
 
 
 def run_once(dry_run: bool = True, force: bool = False) -> None:
@@ -76,6 +79,13 @@ def run_once(dry_run: bool = True, force: bool = False) -> None:
             plan.import_c_kwh[idx], plan.export_c_kwh[idx],
         )
 
+        # Generate rationale (uses Claude Opus 4.7 via explain_plan; falls back
+        # to a templated string if no API key or network error)
+        log.info("=== Explaining decision ===")
+        rationale = explain_plan(plan, snapshot, previous_plan=None)
+        log.info("Rationale: %s", rationale)
+        _persist_rationale(snapshot.timestamp, action, rationale)
+
         from arb.actuator.ha_control import apply_action
         reason = f"import={plan.import_c_kwh[idx]:.1f} export={plan.export_c_kwh[idx]:.1f} c/kWh"
         apply_action(
@@ -87,6 +97,16 @@ def run_once(dry_run: bool = True, force: bool = False) -> None:
         )
     else:
         log.warning("Current time is outside the plan horizon")
+
+
+def _persist_rationale(ts: datetime, action: Action, rationale: str) -> None:
+    """Append a single-line rationale entry to the audit log."""
+    try:
+        line = f"{ts.isoformat()}\t{action.value}\t{rationale}\n"
+        with RATIONALE_LOG.open("a", encoding="utf-8") as fh:
+            fh.write(line)
+    except Exception as e:  # noqa: BLE001 — logging must never crash the loop
+        log.error("Failed to persist rationale: %s", e)
 
 
 def main() -> None:
