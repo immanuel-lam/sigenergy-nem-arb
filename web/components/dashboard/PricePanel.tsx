@@ -180,6 +180,7 @@ export function PricePanel() {
             {/* Zero line — a subtle rule */}
             <ReferenceLine
               y={0}
+              yAxisId="price"
               stroke={color.border}
               strokeWidth={1}
               strokeDasharray="2 3"
@@ -188,6 +189,7 @@ export function PricePanel() {
             {currentTs != null && (
               <ReferenceLine
                 x={currentTs}
+                yAxisId="price"
                 stroke={color.cyan}
                 strokeWidth={1}
                 strokeOpacity={0.5}
