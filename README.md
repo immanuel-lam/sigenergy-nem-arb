@@ -1,6 +1,6 @@
 # Sigenergy NEM Arbitrage Agent
 
-Autonomous agent that plans battery charge/discharge against live AEMO wholesale prices and writes the schedule to a Sigenergy inverter. Built for the Built with Opus 4.7 hackathon (deadline 2026-04-28). Runs on exactly one house: Immanuel's place in Sydney, with a 64 kWh Sigenergy LFP pack, 2× Sigen inverters, and 24 kWp of solar on an Amber Electric tariff.
+Autonomous agent that plans battery charge/discharge against live AEMO wholesale prices. Built for the Built with Opus 4.7 hackathon (deadline 2026-04-28). Runs on exactly one house: Immanuel's place in Sydney, with a 64 kWh Sigenergy LFP pack, 2× Sigen inverters, and 24 kWp of solar on an Amber Electric tariff.
 
 Repo: [github.com/immanuel-lam/sigenergy-nem-arb](https://github.com/immanuel-lam/sigenergy-nem-arb)
 
@@ -8,68 +8,80 @@ Repo: [github.com/immanuel-lam/sigenergy-nem-arb](https://github.com/immanuel-la
 
 Every 30 minutes the agent runs a cycle:
 
-1. **Ingest** — AEMO 5MPD prices (NSW1), Open-Meteo cloud/irradiance forecast, HA sensors for SOC, load, solar, battery power. Amber API if the key is set, otherwise derive from NEMWEB.
+1. **Ingest** — AEMO 5MPD prices (NSW1), Open-Meteo cloud and irradiance forecast, HA sensors for SOC, load, solar, battery power. Amber API if the key is set, otherwise derives from NEMWEB.
 2. **Forecast** — 48h load from day-of-week rolling average over HA history; 48h solar from clear-sky × cloud derating.
 3. **Schedule** — greedy rank-and-fill. Enumerates (charge_interval, discharge_interval) pairs, sorts by `(spread × RTE − cycle_cost)`, assigns energy subject to SOC bounds and rate limits.
-4. **Actuate** — writes the current interval's setpoint through the Sigenergy HA integration (`select.plant_remote_ems_control_mode` + charge/discharge limits). Dry-run by default. Audit log at `actuator_audit.log`.
-5. **Log / explain** — plan summary, reasons, SOC trajectory.
+4. **Diff + audit** — diffs the new plan against the last one and audits how far actual SOC drifted from what the previous plan expected.
+5. **Explain** — Opus 4.7 writes two sentences of plain-English rationale, quoting the specific prices and SOC.
+6. **Actuate** — writes the current interval's setpoint through the Sigenergy HA integration (`select.plant_remote_ems_control_mode` + charge/discharge limits). Dry-run by default. Audit log at `actuator_audit.log`.
 
-Runs in **advisory mode** for now. Amber SmartShift keeps controlling the battery. The agent builds its own plan on the same inputs, logs what it would have done, and the backtest compares strategies against Amber's actual dispatch. Nothing writes to the inverter until the dry-run output matches live behaviour for a full day.
+Runs in **advisory mode** for the hackathon. Amber SmartShift keeps controlling the battery. The agent builds its own plan on the same inputs, logs what it would have done, and the backtest compares strategies against Amber's actual dispatch.
+
+## Results
+
+7-day backtest on Immanuel's real data (2026-04-15 to 2026-04-22), perfect-foresight upper bound:
+
+| Strategy | Cost $ | Import kWh | Export kWh | Cycles |
+|---|---:|---:|---:|---:|
+| **Agent (greedy)** | **0.17** | 0.1 | 8.6 | 2.20 |
+| B1 self-consume | 0.17 | 0.1 | 8.6 | 2.20 |
+| B2 static TOU | 93.48 | 328.6 | 294.5 | 6.66 |
+| B3 Amber SmartShift (actual) | 41.52 | 312.2 | 340.8 | 2.65 |
+
+Agent beats static TOU by **$13.33/day** and Amber's actual dispatch by **$5.91/day** over this week. The honest reading: Amber's feed-in tariff on this house is negative or near zero, so pure grid arbitrage loses money. The agent correctly declines to trade and lands on self-consume. Amber's aggressive round-tripping (340 kWh exported) paid the negative export price repeatedly.
+
+The Amber comparison is reconstructed from HA history (`arb/eval/amber_replay.py`) and should be read as indicative — Amber optimises for things we don't model, like network peak tariffs.
 
 ## Architecture
 
 ```
 ingest/       forecast/     scheduler/    actuator/
   aemo.py       load.py       greedy.py     ha_control.py   (primary)
-  amber.py      solar.py      plan.py       sigen_modbus.py (fallback)
+  amber.py      solar.py      plan.py       sigen_modbus.py (reference)
   bom.py        builder.py    constants.py
   ha.py
   snapshot.py
-                                  |
-                                  v
-                           agent/loop.py   (ingest -> forecast -> schedule -> actuate)
+
+agent/          eval/           demo/
+  loop.py         backtest.py     dashboard.py  (Streamlit)
+  explain.py      baselines.py
+  plan_diff.py    amber_replay.py
+  audit.py        offline_dryrun.py
+                  run_backtest.py
 ```
 
-Layers don't skip. Ingest returns dataframes. Forecast reads dataframes, returns dataframes. Scheduler reads a forecast dataframe and a starting SOC, returns a `Plan`. Actuator reads a `Plan` and either writes setpoints or logs intent. Same code runs live and in backtest.
+Layers don't skip. Ingest returns dataframes. Forecast reads dataframes, returns dataframes. Scheduler takes a forecast dataframe and a starting SOC, returns a `Plan`. Actuator reads a `Plan` and either writes setpoints or logs intent. Same code runs live and in backtest.
 
-## Current status
+## Status
 
-Day 1 (done):
-- Repo scaffold, `CLAUDE.md` plan doc, `.env.example`.
-- `arb/ingest/aemo.py` pulling NSW1 RRP from NEMWEB.
-- `arb/ingest/ha.py` history pull against HA REST API.
-- `arb/ingest/bom.py` via open-meteo.
-- `arb/ingest/amber.py` with timestamp alignment fixed.
-- `arb/ingest/snapshot.py` merges the sources and flags stale sensors.
+Shipped:
+- Ingest: AEMO, Amber (historical + forecast), Open-Meteo, HA REST
+- Forecast: load day-of-week, solar clear-sky × cloud
+- Scheduler: greedy rank-and-fill with `Plan` SOC trajectory, rate caps, hard SOC bounds
+- Actuator: HA service-call path via `select.plant_remote_ems_control_mode`, audit log, rate limiter (10 writes/hr), SOC hard refuse, `ARB_KILL` switch
+- Agent loop: `--once` and `--continuous` modes, signal shutdown, previous-plan persistence
+- Explain: Opus 4.7 via anthropic SDK, fallback template if API down
+- Plan diff: structured old vs new plan comparison
+- Execution audit: post-interval SOC drift check
+- Backtest: no-look-ahead replay with perfect-foresight toggle, self-consume in the sim layer
+- Baselines: B1 self-consume, B2 static TOU, B3 Amber actual reconstruction
+- Offline 24h dry-run: replays last N hours through the live pipeline
+- Streamlit dashboard: live SOC gauge, 24h chart, backtest panel, rationale log
+- 73 tests, all passing
 
-Day 2 (done):
-- `arb/forecast/load.py` day-of-week rolling mean.
-- `arb/forecast/solar.py` clear-sky × cloud derate.
-- `arb/forecast/builder.py` glues price + load + solar into one frame.
-- `arb/scheduler/greedy.py` + `plan.py` — greedy rank-and-fill, SOC trajectory, rate caps.
-- `arb/scheduler/constants.py` — battery specs in one place.
-- `arb/actuator/sigen_modbus.py` read-only client against the real Sigen register map.
-- `arb/actuator/ha_control.py` write path via HA integration (dry-run default, audit log).
-- `arb/agent/loop.py` — one-shot cycle runs end-to-end.
+Not shipped:
+- HA heartbeat sensor. Kill switch works via env but no external liveness signal.
+- Sensitivity analysis (capacity sweep, cycle cost calibration) — brainstormed, not built.
+- Mid-interval re-plan on price spikes. The 30-min cadence is fine for Amber but a real cap event ($17.50/kWh) would need faster reaction.
 
-Pending (Day 3+):
-- `arb/agent/explain.py` — LLM rationale between consecutive plans.
-- `arb/eval/backtest.py` — no-look-ahead replay harness.
-- `arb/eval/baselines.py` — self-consume only, static TOU.
-- Continuous 30-min loop (currently `--once` only).
-- `arb/demo/dashboard.py` — Streamlit.
-- Rate limiter on writes (1/10min, 10/hr cap).
-- Kill switch is wired via env var but no HA heartbeat yet.
-- Tests. No `tests/` directory yet. This is a gap.
+## Hardware and assumptions
 
-## Hardware / assumptions
-
-- Battery: Sigenergy 64 kWh LFP, 2× inverters (15 kW each).
-- Solar: 24 kWp.
-- Region: NSW1.
-- Tariff: Amber Electric (5-min NEM pass-through). If this turns out to be fixed TOU the arbitrage premise weakens and we pivot to self-consumption optimisation.
-- SOC floor 10%, ceiling 95%, round-trip efficiency 90%, cycle cost 2 c/kWh (conservative LFP).
-- Agent loop 30 min, horizon 24 h, scheduler granularity 5 min.
+- Battery: Sigenergy 64 kWh LFP, 2× inverters (15 kW each)
+- Solar: 24 kWp
+- Region: NSW1
+- Tariff: Amber Electric (5-min NEM pass-through)
+- SOC floor 10%, ceiling 95%, round-trip efficiency 90%, cycle cost 2 c/kWh (conservative LFP)
+- Agent loop 30 min, horizon 24 h, scheduler granularity 5 min
 
 ## Setup
 
@@ -79,34 +91,37 @@ cd sigenergy-nem-arb
 python3 -m venv .venv && source .venv/bin/activate
 pip install -e ".[dev]"
 cp .env.example .env
-# Fill in HA_URL, HA_TOKEN, Sigen IPs/unit IDs, lat/long, AMBER_API_KEY if you have one.
-python -m arb.agent.loop --once --dry-run
+# Fill in HA_URL, HA_TOKEN, AMBER_API_KEY, lat/long, Sigen HA entity IDs.
+python -m pytest tests/
+python -m arb.agent.loop --once
 ```
 
-Running the loop against live data:
+Live usage:
 
 ```bash
-python -m arb.ingest.snapshot        # prints current price, SOC, next 6h forecast
-python -m arb.agent.loop --once      # one full cycle, dry-run by default
-python -m arb.agent.loop --once --force   # ignore stale-sensor check
+python -m arb.ingest.snapshot               # prints current price, SOC, forecast coverage
+python -m arb.agent.loop --once             # one cycle, dry-run by default
+python -m arb.agent.loop --continuous       # keep going every 30 min
+python -m arb.eval.run_backtest 7           # 7-day backtest, all strategies
+python -m arb.eval.offline_dryrun 24        # replay last 24h at 30-min cadence
+streamlit run arb/demo/dashboard.py         # live dashboard
 ```
 
 ## Safety
 
-- `DRY_RUN=true` is the default in `.env.example` and `loop.py`. The actuator refuses to write when set.
-- SOC bounds enforced in two places: the scheduler clips the plan, the actuator hard-refuses writes that would breach 10%/95%.
-- `ARB_KILL=1` makes the loop no-op and log. Environment flip from anywhere.
-- Every write attempt (real or dry) logs to `actuator_audit.log` with timestamp, entity, old/new, reason.
-- Advisory mode for the whole hackathon demo window. No live writes until the backtest-to-dry-run match is clean.
-
-Not done yet: rate limiter on writes, HA heartbeat sensor. Both on the Day 3 list.
-
-## Results
-
-Pending. Backtest harness is Day 3 work. Realistic expectation for NSW Amber with 64 kWh is $3–8/day arbitrage uplift over pure self-consume. If the first backtest prints much higher than that, something has look-ahead bias and the number gets thrown out until it's fixed.
+- `DRY_RUN=true` default. Actuator refuses writes when set.
+- SOC bounds enforced twice: scheduler clips, actuator hard-refuses breaches of 10% / 95%.
+- Rate limiter: max 10 writes per hour through `ha_control.py`. Protects Sigen flash.
+- `ARB_KILL=1` makes the loop no-op and log. Flip from anywhere.
+- Every write attempt (real or dry) logs to `actuator_audit.log`: timestamp, entity, value, reason, dry-run flag.
+- Every rationale logs to `agent_rationale.log` with the exact action and timestamp.
+- Every cross-cycle comparison logs to `execution_audit.log` with SOC drift and status.
+- No live writes this hackathon cycle. Advisory mode only.
 
 ## Hackathon context
 
-Submission for Built with Opus 4.7 (Claude Code virtual hackathon, Apr 28 2026 deadline). The agent is built to lean on Opus 4.7's specific behaviour: it catches its own logical faults during planning, and it reports missing data instead of making it up. Both matter here — a battery scheduler that fabricates a price forecast when NEMWEB is down is a battery scheduler that tries to arbitrage against a hallucination. The loop explicitly surfaces stale sensors and refuses to run unless `--force` is passed.
+Submission for Built with Opus 4.7 (Claude Code virtual hackathon, 2026-04-28 deadline). The agent leans on Opus 4.7's specific traits: it catches logical faults during planning, and it reports missing data instead of fabricating. Both matter here — a battery scheduler that hallucinates a price forecast when NEMWEB is down tries to arbitrage against a ghost. The loop explicitly surfaces stale sensors and refuses to run without `--force`, and the dashboard shows sensor health as coloured status pills.
+
+See `docs/demo_script.md` for the 60-second video plan and `docs/postmortem_template.md` for the writeup skeleton.
 
 Owner: Immanuel. Sole user, sole house.
