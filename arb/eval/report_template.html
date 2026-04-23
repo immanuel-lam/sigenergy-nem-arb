@@ -1,0 +1,552 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{{ title }} — {{ subtitle }}</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,300;0,9..144,400;0,9..144,600;0,9..144,700;1,9..144,400&family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg: #0C1117;
+    --paper: #131A22;
+    --ink: #E8EEF4;
+    --ink-dim: #8D99A6;
+    --accent: #D4AA71;
+    --mint: #5CC8A7;
+    --orange: #D98860;
+    --critical: #C96868;
+    --border: #1F2831;
+  }
+
+  * { box-sizing: border-box; }
+
+  html, body {
+    margin: 0;
+    padding: 0;
+    background: var(--bg);
+    color: var(--ink);
+    font-family: "Inter", -apple-system, BlinkMacSystemFont, sans-serif;
+    font-size: 16px;
+    line-height: 1.65;
+    font-weight: 400;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+
+  .page {
+    max-width: 720px;
+    margin: 0 auto;
+    padding: 80px 80px 120px;
+  }
+
+  @media (max-width: 760px) {
+    .page { padding: 48px 24px 80px; }
+  }
+
+  /* Masthead */
+  .masthead {
+    border-bottom: 1px solid var(--border);
+    padding-bottom: 24px;
+    margin-bottom: 48px;
+  }
+
+  .eyebrow {
+    font-family: "JetBrains Mono", monospace;
+    font-size: 11px;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--ink-dim);
+    margin-bottom: 20px;
+  }
+
+  h1.display {
+    font-family: "Fraunces", "Spectral", Georgia, serif;
+    font-weight: 600;
+    font-size: 48px;
+    line-height: 1.05;
+    letter-spacing: -0.02em;
+    margin: 0 0 10px;
+    color: var(--ink);
+  }
+
+  h1.display em {
+    font-style: italic;
+    font-weight: 400;
+    color: var(--accent);
+  }
+
+  .subtitle {
+    font-family: "Fraunces", Georgia, serif;
+    font-weight: 300;
+    font-style: italic;
+    font-size: 22px;
+    line-height: 1.4;
+    color: var(--ink-dim);
+    margin: 0 0 28px;
+    max-width: 560px;
+  }
+
+  .byline {
+    font-family: "JetBrains Mono", monospace;
+    font-size: 12px;
+    color: var(--ink-dim);
+    letter-spacing: 0.02em;
+  }
+
+  /* Sections */
+  section {
+    margin: 56px 0;
+    position: relative;
+  }
+
+  .section-break {
+    border: none;
+    border-top: 1px solid var(--border);
+    margin: 56px auto;
+    width: 40%;
+    position: relative;
+  }
+  .section-break::after {
+    content: "§";
+    position: absolute;
+    top: -14px;
+    left: 50%;
+    transform: translateX(-50%);
+    background: var(--bg);
+    color: var(--accent);
+    padding: 0 12px;
+    font-family: "Fraunces", serif;
+    font-size: 18px;
+  }
+
+  h2.section {
+    font-family: "Fraunces", serif;
+    font-weight: 600;
+    font-size: 28px;
+    line-height: 1.15;
+    letter-spacing: -0.02em;
+    margin: 0 0 8px;
+  }
+
+  h2.section .num {
+    font-family: "JetBrains Mono", monospace;
+    font-size: 13px;
+    color: var(--accent);
+    margin-right: 14px;
+    font-weight: 500;
+    letter-spacing: 0.06em;
+    vertical-align: middle;
+  }
+
+  .section-dek {
+    font-family: "Inter", sans-serif;
+    font-weight: 400;
+    font-size: 14px;
+    color: var(--ink-dim);
+    margin: 0 0 24px;
+  }
+
+  p {
+    margin: 0 0 18px;
+    color: var(--ink);
+  }
+
+  /* Drop cap on the first paragraph of section 1 */
+  .has-dropcap > p:first-of-type::first-letter {
+    font-family: "Fraunces", serif;
+    font-size: 64px;
+    line-height: 0.9;
+    float: left;
+    padding: 6px 10px 0 0;
+    color: var(--accent);
+    font-weight: 600;
+  }
+
+  /* Callout / pull quote */
+  blockquote.pull {
+    margin: 32px 0;
+    padding: 20px 24px 22px;
+    border-left: 2px solid var(--accent);
+    background: var(--paper);
+    font-family: "Fraunces", serif;
+    font-weight: 400;
+    font-style: italic;
+    font-size: 20px;
+    line-height: 1.45;
+    color: var(--ink);
+  }
+
+  blockquote.pull .attr {
+    display: block;
+    margin-top: 12px;
+    font-family: "JetBrains Mono", monospace;
+    font-style: normal;
+    font-size: 11px;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--ink-dim);
+  }
+
+  /* Tables — thin horizontal dividers only */
+  table.results {
+    width: 100%;
+    border-collapse: collapse;
+    margin: 24px 0 12px;
+    font-family: "JetBrains Mono", monospace;
+    font-size: 13.5px;
+  }
+  table.results th {
+    text-align: left;
+    font-weight: 600;
+    font-size: 10.5px;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--ink-dim);
+    padding: 10px 12px;
+    border-bottom: 1px solid var(--border);
+  }
+  table.results td {
+    padding: 12px;
+    border-bottom: 1px solid var(--border);
+    font-feature-settings: "tnum";
+  }
+  table.results td.num { text-align: right; font-variant-numeric: tabular-nums; }
+  table.results tr.agent td { color: var(--accent); font-weight: 600; }
+  table.results tr:last-child td { border-bottom: none; }
+
+  /* Margin callouts */
+  .callout-num {
+    font-family: "JetBrains Mono", monospace;
+    font-size: 10.5px;
+    color: var(--accent);
+    letter-spacing: 0.08em;
+  }
+
+  /* Code / log entries */
+  .logblock {
+    background: var(--paper);
+    border: 1px solid var(--border);
+    border-radius: 3px;
+    padding: 14px 18px;
+    font-family: "JetBrains Mono", monospace;
+    font-size: 12.5px;
+    line-height: 1.55;
+    color: var(--ink);
+    overflow-x: auto;
+    margin: 18px 0;
+  }
+
+  .rationale-card {
+    background: var(--paper);
+    border-left: 2px solid var(--mint);
+    padding: 16px 20px;
+    margin: 14px 0;
+  }
+  .rationale-card.CHARGE_GRID { border-left-color: var(--mint); }
+  .rationale-card.DISCHARGE_GRID { border-left-color: var(--accent); }
+  .rationale-card.HOLD_SOLAR { border-left-color: var(--mint); }
+  .rationale-card.IDLE { border-left-color: var(--ink-dim); }
+
+  .rationale-meta {
+    font-family: "JetBrains Mono", monospace;
+    font-size: 11px;
+    color: var(--ink-dim);
+    letter-spacing: 0.05em;
+    margin-bottom: 6px;
+  }
+  .rationale-meta .action {
+    color: var(--accent);
+    font-weight: 600;
+  }
+
+  .rationale-text {
+    font-family: "Fraunces", serif;
+    font-style: italic;
+    font-size: 16px;
+    line-height: 1.55;
+    color: var(--ink);
+    margin: 0;
+  }
+
+  /* Key-fact grid for "The setup" */
+  .facts {
+    display: grid;
+    grid-template-columns: auto 1fr;
+    gap: 10px 24px;
+    margin: 16px 0 4px;
+    font-size: 14.5px;
+  }
+  .facts dt {
+    font-family: "JetBrains Mono", monospace;
+    font-size: 11px;
+    color: var(--ink-dim);
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    padding-top: 3px;
+  }
+  .facts dd { margin: 0; }
+
+  /* Loop diagram (inline SVG) */
+  .loop-diagram {
+    margin: 24px 0 12px;
+    display: block;
+  }
+
+  /* Caveat list */
+  ul.caveats {
+    list-style: none;
+    padding: 0;
+    margin: 16px 0;
+  }
+  ul.caveats li {
+    padding: 10px 0 10px 28px;
+    border-bottom: 1px solid var(--border);
+    position: relative;
+  }
+  ul.caveats li:last-child { border-bottom: none; }
+  ul.caveats li::before {
+    content: "—";
+    position: absolute;
+    left: 0;
+    color: var(--accent);
+    font-family: "Fraunces", serif;
+  }
+
+  /* Colophon */
+  .colophon {
+    margin-top: 80px;
+    padding-top: 28px;
+    border-top: 1px solid var(--border);
+    font-family: "JetBrains Mono", monospace;
+    font-size: 11.5px;
+    letter-spacing: 0.04em;
+    color: var(--ink-dim);
+    line-height: 1.7;
+  }
+  .colophon a { color: var(--accent); text-decoration: none; }
+  .colophon a:hover { text-decoration: underline; }
+
+  .chart-wrap {
+    background: var(--paper);
+    border: 1px solid var(--border);
+    padding: 18px;
+    margin: 20px 0;
+    border-radius: 3px;
+  }
+
+  .no-data {
+    font-style: italic;
+    color: var(--ink-dim);
+    font-size: 14px;
+    padding: 12px 0;
+  }
+
+  strong { color: var(--ink); font-weight: 600; }
+
+  a { color: var(--accent); }
+</style>
+</head>
+<body>
+<article class="page">
+
+  <header class="masthead">
+    <div class="eyebrow">Sigenergy NEM Arbitrage Agent · Research Note</div>
+    <h1 class="display">{{ title }} — <em>{{ subtitle }}</em></h1>
+    <p class="subtitle">Seven days of autonomous battery decisions on one Sydney home, measured against two baselines and the incumbent controller.</p>
+    <div class="byline">Generated {{ generated_at }} &nbsp;·&nbsp; {{ git_hash }}</div>
+  </header>
+
+  <!-- SECTION 1 — ABSTRACT -->
+  <section class="has-dropcap">
+    <h2 class="section"><span class="num">§ 1</span>Summary</h2>
+    <p class="section-dek">What the agent did over the window and what it cost.</p>
+    {% for para in abstract.split('\n\n') %}
+      {% if para.strip() %}<p>{{ para.strip() }}</p>{% endif %}
+    {% endfor %}
+  </section>
+
+  <hr class="section-break">
+
+  <!-- SECTION 2 — SETUP -->
+  <section>
+    <h2 class="section"><span class="num">§ 2</span>The setup</h2>
+    <p class="section-dek">One Sydney house, two inverters, advisory mode.</p>
+    <dl class="facts">
+      <dt>Battery</dt><dd>64 kWh usable Sigenergy LFP (70 kWh nominal), 2× inverters</dd>
+      <dt>Solar</dt><dd>24 kWp rooftop array</dd>
+      <dt>Region</dt><dd>NSW1 (Sydney)</dd>
+      <dt>Tariff</dt><dd>Amber Electric, 5-minute NEM pass-through</dd>
+      <dt>Incumbent</dt><dd>Amber SmartShift — drives the battery in production</dd>
+      <dt>This agent</dt><dd>Advisory only; publishes plans and rationale every 30 min</dd>
+      <dt>Cycle cost</dt><dd>2 c/kWh modelled (LFP degradation estimate)</dd>
+      <dt>SOC bounds</dt><dd>10 % floor, 95 % ceiling</dd>
+    </dl>
+  </section>
+
+  <hr class="section-break">
+
+  <!-- SECTION 3 — HOW THE AGENT THINKS -->
+  <section>
+    <h2 class="section"><span class="num">§ 3</span>How the agent thinks</h2>
+    <p class="section-dek">The 30-minute loop, compressed.</p>
+    <p>Every 30 minutes the agent runs one cycle: <strong>ingest</strong> Amber prices plus Home Assistant state, <strong>forecast</strong> load and solar out 6 hours, <strong>schedule</strong> via a greedy pair-and-fill ranker over all profitable charge/discharge pairs, <strong>explain</strong> the decision in two sentences through Claude Opus 4.7, and <strong>log</strong> the plan plus rationale. In live-actuation mode a sixth step writes the setpoint to the Sigen Modbus registers. The backtest here runs the first five only.</p>
+
+    <svg class="loop-diagram" viewBox="0 0 680 90" width="100%" height="90" role="img" aria-label="Six step loop: ingest, forecast, schedule, explain, actuate, log">
+      <defs>
+        <marker id="arr" viewBox="0 0 10 10" refX="6" refY="5" markerWidth="6" markerHeight="6" orient="auto">
+          <path d="M0,0 L10,5 L0,10 z" fill="#8D99A6"/>
+        </marker>
+      </defs>
+      {% set steps = ['ingest', 'forecast', 'schedule', 'explain', 'actuate', 'log'] %}
+      {% for s in steps %}
+        {% set x = 20 + loop.index0 * 110 %}
+        <rect x="{{ x }}" y="24" width="90" height="42" fill="#131A22" stroke="#1F2831" stroke-width="1" rx="3"/>
+        <text x="{{ x + 45 }}" y="50" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="12" fill="#E8EEF4">{{ s }}</text>
+        {% if not loop.last %}
+          <line x1="{{ x + 92 }}" y1="45" x2="{{ x + 108 }}" y2="45" stroke="#8D99A6" stroke-width="1" marker-end="url(#arr)"/>
+        {% endif %}
+      {% endfor %}
+    </svg>
+    <p style="font-size:13px;color:var(--ink-dim);margin-top:4px;">Code: <a href="https://github.com/immanuel-lam/sigenergy-nem-arb/blob/main/arb/agent/loop.py"><code>arb/agent/loop.py</code></a> · scheduler: <a href="https://github.com/immanuel-lam/sigenergy-nem-arb/blob/main/arb/scheduler/greedy.py"><code>arb/scheduler/greedy.py</code></a></p>
+  </section>
+
+  <hr class="section-break">
+
+  <!-- SECTION 4 — RESULTS -->
+  <section>
+    <h2 class="section"><span class="num">§ 4</span>Results</h2>
+    <p class="section-dek">{{ backtest.days }}-day backtest. Lower cost is better. Perfect-foresight upper bound.</p>
+
+    {% if backtest.rows %}
+    <table class="results">
+      <thead>
+        <tr>
+          <th>Strategy</th>
+          <th style="text-align:right">Cost</th>
+          <th style="text-align:right">Import kWh</th>
+          <th style="text-align:right">Export kWh</th>
+          <th style="text-align:right">Cycles</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for r in backtest.rows %}
+        <tr class="{{ 'agent' if r.name == 'agent_greedy' else '' }}">
+          <td>{{ r.label }}</td>
+          <td class="num">{{ r.cost | dollars }}</td>
+          <td class="num">{{ '%.1f' % r.import_kwh }}</td>
+          <td class="num">{{ '%.1f' % r.export_kwh }}</td>
+          <td class="num">{{ '%.2f' % r.cycles }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    {% else %}
+    <p class="no-data">Backtest data not available in this run{% if backtest.error %} ({{ backtest.error }}){% endif %}.</p>
+    {% endif %}
+
+    <blockquote class="pull">
+      Agent {{ backtest.agent_cost | dollars }} · Self-consume {{ backtest.b1_cost | dollars }} · Static TOU {{ backtest.b2_cost | dollars }}{% if backtest.amber_cost is not none %} · Amber SmartShift {{ backtest.amber_cost | dollars }}{% endif %}.
+      <span class="attr">{{ backtest.days }}-day backtest · NSW1 Amber 5MPD · Perfect-foresight upper bound</span>
+    </blockquote>
+
+    {% if chart_html %}
+    <div class="chart-wrap">
+      {{ chart_html | safe }}
+    </div>
+    <p style="font-size:13px;color:var(--ink-dim);margin-top:4px;">SOC trajectories for each strategy over the {{ backtest.days }}-day window. All three strategies start from the same initial SOC and face the same actual load, solar, and price series.</p>
+    {% endif %}
+
+    {% for para in interpretation.split('\n\n') %}
+      {% if para.strip() %}<p>{{ para.strip() }}</p>{% endif %}
+    {% endfor %}
+  </section>
+
+  <hr class="section-break">
+
+  <!-- SECTION 5 — VERBATIM RATIONALE -->
+  <section>
+    <h2 class="section"><span class="num">§ 5</span>What the agent said</h2>
+    <p class="section-dek">Verbatim entries from <code>agent_rationale.log</code>, selected for specificity.</p>
+
+    {% if rationale %}
+      {% for r in rationale %}
+      <div class="rationale-card {{ r.action }}">
+        <div class="rationale-meta">
+          <span class="action">{{ r.action }}</span> &nbsp;·&nbsp; {{ r.timestamp }}
+        </div>
+        <p class="rationale-text">{{ r.text }}</p>
+      </div>
+      {% endfor %}
+    {% else %}
+      <p class="no-data">No rationale entries logged yet. The agent writes to this log every 30 minutes while running.</p>
+    {% endif %}
+  </section>
+
+  <hr class="section-break">
+
+  <!-- SECTION 6 — WHERE THE AGENT WAS WRONG -->
+  <section>
+    <h2 class="section"><span class="num">§ 6</span>Where the agent was wrong</h2>
+    <p class="section-dek">Plan vs actual drift from <code>execution_audit.log</code>.</p>
+
+    {% if audit.has_drift %}
+      {% for d in audit.drift %}
+      <div class="logblock">
+        <div><strong>{{ d.timestamp }}</strong> — status: {{ d.status }}</div>
+        <div>planned: {{ d.planned_action }} &nbsp; SOC {{ '%.1f' % (d.planned_soc_before * 100) }}% → {{ '%.1f' % (d.planned_soc_after * 100) }}%</div>
+        <div>actual: SOC {{ d.actual_soc_before }}% → {{ d.actual_soc_after }}% &nbsp; battery {{ d.actual_battery_power_kw }} kW</div>
+        {% if d.notes %}<div style="color:var(--ink-dim);margin-top:6px;">{{ d.notes }}</div>{% endif %}
+      </div>
+      {% endfor %}
+    {% else %}
+      <p>{{ audit.note }}</p>
+    {% endif %}
+  </section>
+
+  <hr class="section-break">
+
+  <!-- SECTION 7 — THE SPIKE WE DIDN'T SEE -->
+  <section>
+    <h2 class="section"><span class="num">§ 7</span>The price spike we didn't see</h2>
+    <p class="section-dek">Thirty-day scan of Amber history for price excursions.</p>
+
+    <p>A scan of the last {{ spikes.scan_days }} days of Amber data at a {{ '%.0f' % spikes.threshold_c_kwh }} c/kWh deviation-from-rolling-median threshold turned up <strong>{{ spikes.count }}</strong> real spike events on this meter. NSW1 spent April trading in a quiet range; no FCAS lockouts, no evening caps, no negative-price storms lasting long enough to flip the arbitrage signal materially.</p>
+
+    <p>A spike, when it happens, looks like a 5-minute import print above the rolling two-hour median by 50 c/kWh or more. The agent's greedy ranker pairs that interval with any earlier low-price window as a discharge target; on the next 30-minute cycle the current-interval action flips from IDLE to DISCHARGE_GRID and the rationale cites the new forecast peak. {{ spikes.demo_reference }}</p>
+
+    {% if spikes.events %}
+    <div class="logblock">
+      {% for e in spikes.events[:5] %}
+        <div>{{ e }}</div>
+      {% endfor %}
+    </div>
+    {% endif %}
+  </section>
+
+  <hr class="section-break">
+
+  <!-- SECTION 8 — CAVEATS -->
+  <section>
+    <h2 class="section"><span class="num">§ 8</span>Caveats and limits</h2>
+    <p class="section-dek">What this number does and doesn't prove.</p>
+
+    <ul class="caveats">
+      <li><strong>Perfect foresight.</strong> The backtest feeds actual future prices into the scheduler as its "forecast." This is an upper bound on what a perfect predictor could capture, not a live-trading number. The realistic-forecast variant (<code>--realistic</code>) narrows the Agent-vs-B1 gap further.</li>
+      <li><strong>Amber reconstruction is indicative.</strong> SmartShift's cost is inferred from measured battery-power flows, not from Amber's own ledger. SmartShift optimises against a richer signal set (grid-service revenue, network tariffs) that this model does not see, so direct cost comparison understates what SmartShift is actually doing.</li>
+      <li><strong>Seven days is short.</strong> No evening cap events, no negative-price storms of material duration, no FCAS lockouts. The arbitrage case looks weak here; a different seven days would look different.</li>
+      <li><strong>Advisory only.</strong> No Modbus writes occurred during this run. Plan-vs-actual drift in §6 describes the delta between the agent's plan and what SmartShift did, not the agent driving the battery.</li>
+    </ul>
+  </section>
+
+  <!-- COLOPHON -->
+  <footer class="colophon">
+    <div>Built with Claude Opus 4.7 for the <em>Built with Opus 4.7</em> hackathon.</div>
+    <div>Repository: <a href="https://github.com/immanuel-lam/sigenergy-nem-arb">github.com/immanuel-lam/sigenergy-nem-arb</a></div>
+    <div>Code MIT licensed. Report rendered {{ generated_at }}, commit {{ git_hash }}.</div>
+  </footer>
+
+</article>
+</body>
+</html>
