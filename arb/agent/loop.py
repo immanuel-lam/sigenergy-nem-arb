@@ -60,49 +60,33 @@ def run_once(dry_run: bool = True, force: bool = False) -> None:
     plan = schedule(forecast_df, soc_now)
     log.info(plan.summary())
 
-    # 4. Report what would be written
+    # 4. Actuate
     idx = plan.current_interval_idx
     if idx is not None:
         action = plan.actions[idx]
         charge = plan.charge_grid_kwh[idx]
         discharge = plan.discharge_grid_kwh[idx]
+        charge_kw = charge / (INTERVAL_MIN / 60.0)
+        discharge_kw = discharge / (INTERVAL_MIN / 60.0)
 
-        if action == Action.CHARGE_GRID:
-            power_kw = charge / (INTERVAL_MIN / 60.0)
-            log.info(">>> WOULD WRITE: Force charge at %.1f kW", power_kw)
-        elif action == Action.DISCHARGE_GRID:
-            power_kw = discharge / (INTERVAL_MIN / 60.0)
-            log.info(">>> WOULD WRITE: Force discharge at %.1f kW", power_kw)
-        elif action == Action.HOLD_SOLAR:
-            log.info(">>> WOULD WRITE: Hold solar (block export)")
-        else:
-            log.info(">>> WOULD WRITE: Self-consume mode (IDLE)")
-
+        log.info("=== Actuating ===")
         log.info(
-            ">>> Current SOC: %.1f%% -> %.1f%% | Price: import %.1f c/kWh, export %.1f c/kWh",
-            plan.soc[idx] * 100, plan.soc[idx + 1] * 100,
+            "Action: %s | SOC: %.1f%% -> %.1f%% | Price: import %.1f, export %.1f c/kWh",
+            action.value, plan.soc[idx] * 100, plan.soc[idx + 1] * 100,
             plan.import_c_kwh[idx], plan.export_c_kwh[idx],
+        )
+
+        from arb.actuator.ha_control import apply_action
+        reason = f"import={plan.import_c_kwh[idx]:.1f} export={plan.export_c_kwh[idx]:.1f} c/kWh"
+        apply_action(
+            action=action,
+            charge_kw=charge_kw,
+            discharge_kw=discharge_kw,
+            soc_pct=snapshot.soc_pct,
+            reason=reason,
         )
     else:
         log.warning("Current time is outside the plan horizon")
-
-    if not dry_run:
-        log.warning("DRY_RUN=false but write path not implemented yet (Day 3)")
-
-    # 5. Modbus read (optional, don't fail if unreachable)
-    log.info("=== Modbus read ===")
-    try:
-        from arb.actuator.sigen_modbus import read_all_inverters_sync
-        states = read_all_inverters_sync()
-        for s in states:
-            if s.read_ok:
-                log.info("Inverter %s: SOC=%.1f%%, mode=%s", s.ip, s.soc_pct, s.running_mode)
-            else:
-                log.warning("Inverter %s: %s", s.ip, s.error)
-        if not states:
-            log.info("No inverters configured, skipping Modbus read")
-    except Exception as e:
-        log.info("Modbus read skipped: %s", e)
 
 
 def main() -> None:

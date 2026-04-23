@@ -1,4 +1,12 @@
-"""Sigenergy inverter Modbus TCP client — read-only on Day 2."""
+"""Sigenergy register map reference and direct Modbus client (fallback only).
+
+The primary control path is through HA service calls (see ha_control.py),
+since the Sigenergy-Local-Modbus HA integration already holds the Modbus TCP
+connection. This module documents the register map and provides a direct
+Modbus client for cases where HA is unavailable.
+
+Register map from: https://github.com/TypQxQ/Sigenergy-Local-Modbus/
+"""
 from __future__ import annotations
 
 import asyncio
@@ -11,15 +19,51 @@ from dotenv import load_dotenv
 load_dotenv()
 log = logging.getLogger(__name__)
 
-DRY_RUN = os.getenv("DRY_RUN", "true").lower() in ("true", "1", "yes")
+# --- Unit IDs ---
+PLANT_UNIT_ID = 247
+# Inverter unit IDs are typically 1, 2, etc.
 
-# Register addresses — PLACEHOLDERS, verify against Sigen Modbus protocol PDF.
-# Immanuel will provide the real register map.
-REG_BATTERY_SOC = 0x0100
-REG_RUNNING_MODE = 0x0200
-REG_ACTIVE_POWER = 0x0300
-REG_MAX_CHARGE_POWER = 0x0400
-REG_MAX_DISCHARGE_POWER = 0x0500
+# --- Read-only registers (30000 range) ---
+
+# Plant level
+REG_PLANT_EMS_WORK_MODE = 30003        # U16, gain 1
+REG_PLANT_GRID_POWER = 30005           # S32 (2 regs), gain 1000 -> kW
+REG_PLANT_SOC = 30014                  # U16, gain 10 -> %
+REG_PLANT_ACTIVE_POWER = 30031         # S32 (2 regs), gain 1000 -> kW
+REG_PLANT_ESS_POWER = 30037            # S32 (2 regs), gain 1000 -> kW, <0=discharge >0=charge
+REG_PLANT_RUNNING_STATE = 30051        # U16: 0=standby, 1=running, 2=fault
+
+# Inverter level
+REG_INV_RATED_CHARGE_POWER = 30550     # U32 (2 regs), gain 1000 -> kW
+REG_INV_RATED_DISCHARGE_POWER = 30552  # U32 (2 regs), gain 1000 -> kW
+REG_INV_RUNNING_STATE = 30578          # U16
+REG_INV_ACTIVE_POWER = 30587           # S32 (2 regs), gain 1000 -> kW
+REG_INV_MAX_CHARGE_POWER = 30591       # U32 (2 regs), gain 1000 -> kW
+REG_INV_MAX_DISCHARGE_POWER = 30593    # U32 (2 regs), gain 1000 -> kW
+REG_INV_ESS_POWER = 30599             # S32 (2 regs), gain 1000 -> kW
+REG_INV_SOC = 30601                    # U16, gain 10 -> %
+REG_INV_SOH = 30602                    # U16, gain 10 -> %
+REG_INV_CELL_TEMP = 30603             # S16, gain 10 -> °C
+
+# --- Writable registers (40000 range) ---
+
+REG_PLANT_START_STOP = 40000                  # U16: 0=stop, 1=start
+REG_PLANT_ACTIVE_POWER_TARGET = 40001         # S32 (2 regs), gain 1000 -> kW
+REG_PLANT_REMOTE_EMS_MODE = 40031             # U16: see EMS_MODE_*
+REG_PLANT_ESS_MAX_CHARGE_LIMIT = 40032        # U32 (2 regs), gain 1000 -> kW
+REG_PLANT_ESS_MAX_DISCHARGE_LIMIT = 40034     # U32 (2 regs), gain 1000 -> kW
+REG_PLANT_BACKUP_SOC = 40046                  # U16, gain 10 -> %
+REG_PLANT_CHARGE_CUTOFF_SOC = 40047           # U16, gain 10 -> %
+REG_PLANT_DISCHARGE_CUTOFF_SOC = 40048        # U16, gain 10 -> %
+
+# EMS work modes (for REG_PLANT_REMOTE_EMS_MODE)
+EMS_MODE_PCS_REMOTE = 0
+EMS_MODE_STANDBY = 1
+EMS_MODE_MAX_SELF_CONSUMPTION = 2
+EMS_MODE_CHARGE_GRID_FIRST = 3
+EMS_MODE_CHARGE_PV_FIRST = 4
+EMS_MODE_DISCHARGE_PV_FIRST = 5
+EMS_MODE_DISCHARGE_ESS_FIRST = 6
 
 
 @dataclass
@@ -30,9 +74,10 @@ class InverterState:
     ip: str
     soc_pct: float | None = None
     running_mode: int | None = None
-    active_power_w: float | None = None
-    max_charge_w: float | None = None
-    max_discharge_w: float | None = None
+    active_power_kw: float | None = None
+    ess_power_kw: float | None = None
+    max_charge_kw: float | None = None
+    max_discharge_kw: float | None = None
     read_ok: bool = False
     error: str | None = None
 
@@ -49,7 +94,7 @@ def _get_inverter_configs() -> list[tuple[str, int, int]]:
     return configs
 
 
-def _decode_signed_32(registers: list[int]) -> float:
+def _decode_s32(registers: list[int]) -> float:
     """Decode two 16-bit Modbus registers as a signed 32-bit int."""
     raw = (registers[0] << 16) | registers[1]
     if raw >= 0x80000000:
@@ -58,7 +103,11 @@ def _decode_signed_32(registers: list[int]) -> float:
 
 
 async def read_inverter(ip: str, port: int = 502, unit_id: int = 1) -> InverterState:
-    """Read battery state from one Sigen inverter via Modbus TCP."""
+    """Read battery state from one Sigen inverter via direct Modbus TCP.
+
+    NOTE: This will fail if the HA Sigenergy integration already holds
+    the Modbus connection. Use ha_control.read_state() instead.
+    """
     from pymodbus.client import AsyncModbusTcpClient
 
     state = InverterState(unit_id=unit_id, ip=ip)
@@ -67,32 +116,32 @@ async def read_inverter(ip: str, port: int = 502, unit_id: int = 1) -> InverterS
     try:
         connected = await client.connect()
         if not connected:
-            state.error = f"Connection failed to {ip}:{port}"
+            state.error = f"Connection refused at {ip}:{port} (HA integration may hold the connection)"
             return state
 
-        # Read SOC
-        result = await client.read_holding_registers(REG_BATTERY_SOC, 1, slave=unit_id)
+        # Read SOC (plant level, unit 247)
+        result = await client.read_holding_registers(REG_PLANT_SOC, 1, slave=PLANT_UNIT_ID)
         if not result.isError():
             state.soc_pct = result.registers[0] / 10.0
 
-        # Read running mode
-        result = await client.read_holding_registers(REG_RUNNING_MODE, 1, slave=unit_id)
+        # Read ESS power (plant level)
+        result = await client.read_holding_registers(REG_PLANT_ESS_POWER, 2, slave=PLANT_UNIT_ID)
+        if not result.isError():
+            state.ess_power_kw = _decode_s32(result.registers) / 1000.0
+
+        # Read running state
+        result = await client.read_holding_registers(REG_PLANT_RUNNING_STATE, 1, slave=PLANT_UNIT_ID)
         if not result.isError():
             state.running_mode = result.registers[0]
 
-        # Read active power (signed 32-bit across 2 registers)
-        result = await client.read_holding_registers(REG_ACTIVE_POWER, 2, slave=unit_id)
-        if not result.isError():
-            state.active_power_w = _decode_signed_32(result.registers)
-
         state.read_ok = True
         log.info(
-            "Inverter %s (unit %d): SOC=%.1f%%, mode=%s, power=%.0fW",
-            ip, unit_id, state.soc_pct or 0, state.running_mode, state.active_power_w or 0,
+            "Direct Modbus %s: SOC=%.1f%%, ESS=%.2fkW, state=%s",
+            ip, state.soc_pct or 0, state.ess_power_kw or 0, state.running_mode,
         )
     except Exception as e:
         state.error = str(e)
-        log.error("Modbus read failed for %s: %s", ip, e)
+        log.error("Direct Modbus read failed for %s: %s", ip, e)
     finally:
         client.close()
 
@@ -100,27 +149,15 @@ async def read_inverter(ip: str, port: int = 502, unit_id: int = 1) -> InverterS
 
 
 async def read_all_inverters() -> list[InverterState]:
-    """Read state from all configured inverters."""
+    """Read state from all configured inverters via direct Modbus."""
     configs = _get_inverter_configs()
     if not configs:
-        log.warning("No inverter IPs configured in env")
+        log.warning("No inverter IPs configured")
         return []
     tasks = [read_inverter(ip, port, uid) for ip, port, uid in configs]
     return await asyncio.gather(*tasks)
 
 
 def read_all_inverters_sync() -> list[InverterState]:
-    """Synchronous wrapper for the agent loop."""
+    """Synchronous wrapper."""
     return asyncio.run(read_all_inverters())
-
-
-if __name__ == "__main__":
-    logging.basicConfig(level=logging.INFO)
-    states = read_all_inverters_sync()
-    for s in states:
-        if s.read_ok:
-            print(f"Inverter {s.ip}: SOC={s.soc_pct}%, mode={s.running_mode}")
-        else:
-            print(f"Inverter {s.ip}: FAILED — {s.error}")
-    if not states:
-        print("No inverters configured. Set SIGEN_INVERTER_1_IP in .env")
