@@ -8,18 +8,18 @@ Repo: [github.com/immanuel-lam/sigenergy-nem-arb](https://github.com/immanuel-la
 
 Every 30 minutes the agent runs a cycle:
 
-1. **Ingest** — AEMO 5MPD prices (NSW1), Open-Meteo cloud and irradiance forecast, HA sensors for SOC, load, solar, battery power. Amber API if the key is set, otherwise derives from NEMWEB.
+1. **Ingest** — AEMO 5MPD prices (NSW1), Open-Meteo cloud and irradiance forecast, HA sensors for SOC, load, solar, battery power. Amber API if the key is set.
 2. **Forecast** — 48h load from day-of-week rolling average over HA history; 48h solar from clear-sky × cloud derating.
-3. **Schedule** — greedy rank-and-fill. Enumerates (charge_interval, discharge_interval) pairs, sorts by `(spread × RTE − cycle_cost)`, assigns energy subject to SOC bounds and rate limits.
-4. **Diff + audit** — diffs the new plan against the last one and audits how far actual SOC drifted from what the previous plan expected.
-5. **Explain** — Opus 4.7 writes two sentences of plain-English rationale, quoting the specific prices and SOC.
-6. **Actuate** — writes the current interval's setpoint through the Sigenergy HA integration (`select.plant_remote_ems_control_mode` + charge/discharge limits). Dry-run by default. Audit log at `actuator_audit.log`.
+3. **Schedule** — greedy rank-and-fill. Enumerates (charge, discharge) interval pairs, sorts by `(spread × RTE − cycle_cost)`, assigns energy under SOC bounds and rate caps.
+4. **Diff + audit** — structured diff of new plan vs the last one; audits how far actual SOC drifted from what the previous plan expected.
+5. **Explain** — Opus 4.7 writes two sentences of rationale quoting the specific prices and SOC.
+6. **Actuate** — writes the current interval's setpoint through the Sigenergy HA integration (`select.plant_remote_ems_control_mode` + charge/discharge limits). Dry-run by default. Every attempt logs to `actuator_audit.log`.
 
-Runs in **advisory mode** for the hackathon. Amber SmartShift keeps controlling the battery. The agent builds its own plan on the same inputs, logs what it would have done, and the backtest compares strategies against Amber's actual dispatch.
+Runs in **advisory mode** for the hackathon. Amber SmartShift keeps control of the battery. The agent builds its own plan on the same inputs, logs what it would have done, and the backtest compares strategies against Amber's actual dispatch reconstructed from HA history.
 
 ## Results
 
-7-day backtest on Immanuel's real data (2026-04-15 to 2026-04-22), perfect-foresight upper bound:
+7-day backtest on Immanuel's real HA + Amber data (2026-04-15 to 2026-04-22). Perfect-foresight upper bound — real forecasting error would reduce the headline numbers somewhat.
 
 | Strategy | Cost $ | Import kWh | Export kWh | Cycles |
 |---|---:|---:|---:|---:|
@@ -28,7 +28,7 @@ Runs in **advisory mode** for the hackathon. Amber SmartShift keeps controlling 
 | B2 static TOU | 93.48 | 328.6 | 294.5 | 6.66 |
 | B3 Amber SmartShift (actual) | 41.52 | 312.2 | 340.8 | 2.65 |
 
-Agent beats static TOU by **$13.33/day** and Amber's actual dispatch by **$5.91/day** over this week. The honest reading: Amber's feed-in tariff on this house is negative or near zero, so pure grid arbitrage loses money. The agent correctly declines to trade and lands on self-consume. Amber's aggressive round-tripping (340 kWh exported) paid the negative export price repeatedly.
+Agent beats static TOU by **$13.33/day** and Amber's actual dispatch by **$5.91/day**. The honest reading: Amber's feed-in on this house sat at or below zero all week, so pure grid arbitrage loses money. The agent correctly declines to trade and lands on self-consume. SmartShift's aggressive round-tripping (340 kWh exported) repeatedly hit the negative export price.
 
 The Amber comparison is reconstructed from HA history (`arb/eval/amber_replay.py`) and should be read as indicative — Amber optimises for things we don't model, like network peak tariffs.
 

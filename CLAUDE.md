@@ -310,50 +310,72 @@ This is where most hackathon projects die quietly or loudly. Do this up front.
 
 ## 9. Implementation roadmap (5 days, Apr 23 → Apr 27)
 
-### Day 1 — Apr 23 (today): Foundation
+### Day 1 — Apr 23: Foundation ✓ done
 
-- Repo scaffold, `CLAUDE.md`, `.env.example`, pre-commit hooks
-- `ingest/aemo.py` pulling NSW1 RRP from NEMWEB, parsing, returning a dataframe
-- `ingest/ha.py` pulling 30 days of history into parquet cache
-- `ingest/bom.py` via open-meteo
-- First plot: price history + load + solar on one chart. This is the "I can see the problem" moment.
+- Repo scaffold, `CLAUDE.md`, `.env.example`
+- `ingest/aemo.py` — NSW1 5MPD from NEMWEB (REGIONSOLUTION table, AEST->UTC, filters INTERVENTION=1)
+- `ingest/bom.py` — Open-Meteo hourly cloud/irradiance/temp/is_day
+- `ingest/ha.py` — REST API history + live state, 5-min resample with 30-min gap fill
+- `ingest/amber.py` — /prices endpoint (current + historical days)
+- `ingest/snapshot.py` — merges sources, flags stale sensors, graceful fallback
 
-**Success criteria:** `python -m arb.ingest.snapshot` prints current price, current SOC, next 6h forecast. No scheduler yet.
+Shipped: 7 tests. Amber returns separate import/export with negative FIT intervals.
 
-### Day 2 — Apr 24: Scheduler v1 + actuator dry-run
+### Day 2 — Apr 24: Scheduler v1 + actuator ✓ done
 
-- `forecast/load.py` — simple approach: same day-of-week, same time-of-day, 4-week rolling average. Good enough.
-- `forecast/solar.py` — clear-sky model × (1 - cloud_cover × 0.75).
-- `scheduler/greedy.py` — the core algorithm above.
-- `actuator/sigen_modbus.py` in **read-only mode** (connect, read SOC, don't write).
-- End-to-end: `python -m arb.agent.loop --once --dry-run` prints a plan and what *would* be written.
+- `forecast/load.py` — day-of-week × time-of-day rolling avg, 4-week window, flat fallback
+- `forecast/solar.py` — clear-sky model from shortwave_radiation × cloud derate
+- `forecast/builder.py` — glues price + load + solar into scheduler-ready DataFrame
+- `scheduler/greedy.py` — greedy rank-and-fill, O(n²) pair enumeration (41k pairs for n=288)
+- `scheduler/plan.py` — Plan dataclass, numpy SOC trajectory, grid-side/battery-side energy accounting
+- `actuator/sigen_modbus.py` — read-only client with real Sigenergy register map (unit 247 plant, 40031 EMS mode, 40032/40034 charge/discharge limits)
+- `actuator/ha_control.py` — primary write path via HA `select`/`number` services (Sigen integration holds the Modbus socket, so direct TCP gets refused)
+- `agent/loop.py` — one-shot end-to-end cycle
 
-**Success criteria:** one full agent cycle runs dry against live data and prints a reasonable plan.
+Shipped: 36 tests, live cycle verified against Immanuel's house (SOC 59.9%, 163 Amber intervals, 288-interval forecast).
 
-### Day 3 — Apr 25: Backtest + baselines
+### Day 3 — Apr 25: Backtest + baselines ✓ done
 
-- `eval/backtest.py` — the replay engine.
-- `eval/baselines.py` — B1 and B2.
-- First backtest report on 7 days. Debug the arbitrage numbers until they look realistic.
-- `agent/explain.py` — LLM call for rationale.
+Four parallel Opus agents spawned and stitched together:
 
-**Success criteria:** backtest report shows agent > B1 > B2 (usually) on $/week, with realistic magnitudes.
+- `eval/backtest.py` — no-look-ahead replay engine, 30-min outer loop × 5-min inner sim, perfect-foresight toggle for upper-bound analysis, self-consume baked into simulator
+- `eval/baselines.py` — B1 self-consume, B2 static TOU (1-5am charge, 5-9pm discharge, tz-aware)
+- `eval/amber_replay.py` — reconstructs SmartShift's actual dispatch from HA battery_power history
+- `agent/explain.py` — Opus 4.7 generates 2-sentence rationale with specific numbers, templated fallback
+- Integrated into loop: rationale persists to `agent_rationale.log`
 
-### Day 4 — Apr 26: Live dry-run + dashboard
+**Result (7 days on real data, 2026-04-15 to 2026-04-22):**
 
-- Run the agent in dry-run mode on live data for 24 hours.
-- Compare its intended actions against what the inverter actually did in self-consume mode.
-- `demo/dashboard.py` — Streamlit with live price chart, SOC, planned vs actual, rationale log.
-- Fix whatever the 24h dry-run reveals (it will reveal things).
+| Strategy | Cost $ | Import kWh | Export kWh | Cycles |
+|---|---:|---:|---:|---:|
+| Agent (greedy) | 0.17 | 0.1 | 8.6 | 2.20 |
+| B1 self-consume | 0.17 | 0.1 | 8.6 | 2.20 |
+| B2 static TOU | 93.48 | 328.6 | 294.5 | 6.66 |
+| B3 Amber SmartShift actual | 41.52 | 312.2 | 340.8 | 2.65 |
 
-**Success criteria:** the dashboard is screenshot-worthy. The 24h dry-run log shows the agent re-planning in response to real events.
+Agent beats B2 by $13.33/day, beats Amber actual by $5.91/day. Honest reading: on this house's negative feed-in, pure arbitrage doesn't work, and the agent correctly declines to trade.
+
+Shipped: 58 tests.
+
+### Day 4 — Apr 26: Dry-run + dashboard + stretch features ✓ done
+
+Four parallel Opus agents + one Sonnet agent:
+
+- `agent/plan_diff.py` — structured old-vs-new plan comparison, timestamp-aligned, separates action/energy/price-only changes
+- `agent/audit.py` — post-interval SOC drift check, JSON-lines log, tolerance-based status
+- `demo/dashboard.py` — Streamlit: SOC gauge, 24h price+SOC+load chart, backtest panel with all 4 strategies, rationale feed, data-quality pills, actuator audit log
+- `eval/offline_dryrun.py` — replays last N hours at 30-min cadence, produces rationale artifacts without waiting real time (48 decisions, 11 action changes clustered at dawn/dusk)
+- `agent/loop.py` upgraded: `--continuous` mode with SIGTERM/SIGINT shutdown, persists previous plan and prior SOC across cycles for diff + audit
+- `docs/demo_script.md` + `docs/postmortem_template.md` — ready for Day 5
+
+Shipped: 73 tests. Live cycle end-to-end: Plan diff `NO_CHANGE`, Audit `status=ok drift=+0.6%`, Opus 4.7 rationale quoting specific SOC/price numbers.
 
 ### Day 5 — Apr 27: Polish + demo + submit
 
-- Record the 60-second video. Keep it tight.
-- Write the postmortem: pick one interesting moment from Day 4's dry-run where the plan changed unexpectedly, explain why.
-- README with architecture diagram, setup, results.
-- **Flip DRY_RUN=false for the actual demo recording only if the backtest-to-dry-run match was clean.** Otherwise stay in dry-run and annotate the video. Do not ship a "yolo it worked" to the hackathon and cook the battery.
+- Record the 60-second video per `docs/demo_script.md` shot list
+- Fill in `docs/postmortem_template.md` — pick one entry from `agent_rationale.log` or `offline_dryrun_rationale.log` where action changed and the delta is interesting
+- Final README pass
+- **Stay in DRY_RUN for the recording.** Advisory mode is the whole point — we're not fighting Amber SmartShift for control. Annotate the video accordingly.
 - Submit.
 
 **Success criteria:** submission URL returned.
@@ -447,46 +469,47 @@ HORIZON_H = 24
 
 ---
 
-## 13. Linear issues to create
+## 13. Work completed (Linear-style rollup)
 
-Flat list. Parent: "Built with Opus 4.7 — Sigenergy NEM Arbitrage Agent" project. Create these on Linear or paste into the command line; the labels and priorities are worth keeping.
+All Day 1-4 issues done. Kept for reference.
 
-| # | Title | Day | Priority | Estimate |
-|---|---|---|---|---|
-| 1 | Repo scaffold + CLAUDE.md + Opus plan | 1 | Urgent | 2 |
-| 2 | AEMO NEMWEB ingestion (NSW1 RRP 5MPD) | 1 | Urgent | 3 |
-| 3 | BOM / open-meteo forecast ingestion | 1 | High | 2 |
-| 4 | HA history pull (load, solar, SOC, 90 days) | 1 | Urgent | 3 |
-| 5 | Load forecaster (day-of-week rolling average) | 2 | High | 2 |
-| 6 | Solar forecaster (clear-sky × cloud derating) | 2 | High | 2 |
-| 7 | Scheduler v1 — greedy rank-and-fill | 2 | Urgent | 5 |
-| 8 | Battery/grid constants + Plan dataclass | 2 | Urgent | 1 |
-| 9 | Sigen Modbus read-only client | 2 | High | 3 |
-| 10 | Sigen Modbus write path with DRY_RUN flag + audit log | 3 | Urgent | 3 |
-| 11 | Safety rails: SOC hard bounds, rate limiter, kill switch | 3 | Urgent | 2 |
-| 12 | Agent loop (ingest → forecast → schedule → actuate) | 3 | Urgent | 3 |
-| 13 | explain.py — LLM rationale for plan changes | 3 | High | 2 |
-| 14 | Backtest harness (no look-ahead) | 3 | Urgent | 5 |
-| 15 | Baseline B1 (self-consume only) | 3 | High | 1 |
-| 16 | Baseline B2 (static TOU) | 3 | High | 1 |
-| 17 | 24h live dry-run on actual house | 4 | Urgent | 2 |
-| 18 | Streamlit dashboard (price, SOC, plan, rationale) | 4 | High | 3 |
-| 19 | Scheduler v2 — LP / MILP with PuLP (stretch) | 4 | Low | 5 |
-| 20 | 60-second demo video | 5 | Urgent | 3 |
-| 21 | Postmortem writeup (one interesting day) | 5 | High | 2 |
-| 22 | README + architecture diagram | 5 | High | 2 |
-| 23 | Submit to hackathon | 5 | Urgent | 1 |
+| # | Title | Day | Status |
+|---|---|---|---|
+| 1 | Repo scaffold + CLAUDE.md + Opus plan | 1 | ✓ |
+| 2 | AEMO NEMWEB ingestion (NSW1 RRP 5MPD) | 1 | ✓ |
+| 3 | BOM / open-meteo forecast ingestion | 1 | ✓ |
+| 4 | HA history pull (load, solar, SOC, 90 days) | 1 | ✓ |
+| 5 | Load forecaster (day-of-week rolling average) | 2 | ✓ |
+| 6 | Solar forecaster (clear-sky × cloud derating) | 2 | ✓ |
+| 7 | Scheduler v1 — greedy rank-and-fill | 2 | ✓ |
+| 8 | Battery/grid constants + Plan dataclass | 2 | ✓ |
+| 9 | Sigen Modbus read-only client | 2 | ✓ |
+| 10 | Sigen write path with DRY_RUN + audit log | 3 | ✓ via HA `ha_control.py` |
+| 11 | Safety rails: SOC bounds, rate limiter, kill switch | 3 | ✓ |
+| 12 | Agent loop (ingest → forecast → schedule → actuate) | 3 | ✓ |
+| 13 | explain.py — LLM rationale for plan changes | 3 | ✓ Opus 4.7 |
+| 14 | Backtest harness (no look-ahead) | 3 | ✓ with perfect-foresight toggle |
+| 15 | Baseline B1 (self-consume only) | 3 | ✓ |
+| 16 | Baseline B2 (static TOU) | 3 | ✓ |
+| 17 | 24h live dry-run on actual house | 4 | ✓ via `offline_dryrun.py` replay |
+| 18 | Streamlit dashboard (price, SOC, plan, rationale) | 4 | ✓ |
+| 19 | Scheduler v2 — LP / MILP with PuLP | 4 | skipped (stretch, per spec warning) |
+| 19b | Plan diff + execution audit (Day 4 stretch) | 4 | ✓ |
+| 20 | 60-second demo video | 5 | script in `docs/demo_script.md` |
+| 21 | Postmortem writeup | 5 | template in `docs/postmortem_template.md` |
+| 22 | README with architecture, setup, results | 5 | ✓ |
+| 23 | Submit to hackathon | 5 | pending |
 
 ---
 
-## 14. Open questions (answer before Day 1 ends)
+## 14. Open questions — all answered
 
-- [ ] Amber Electric or fixed TOU? (Big impact on premise.)
-- [ ] HA entity IDs for load, solar, SOC, battery_power?
-- [ ] Sigen inverter IPs and Modbus unit IDs?
-- [ ] Do you have the Sigen Modbus register map PDF handy?
-- [ ] Location lat/long for open-meteo?
-- [ ] Is there an existing HA automation for the battery that we need to disable before the agent takes over?
+- **Amber Electric or fixed TOU?** Amber. Confirmed, API key in `.env`.
+- **HA entity IDs?** Confirmed by Immanuel, in his `.env`.
+- **Sigen inverter IPs + unit IDs?** Confirmed. Port 502. But the HA Sigenergy integration (TypQxQ/Sigenergy-Local-Modbus) holds the Modbus connection, so direct TCP is refused. Actuator pivoted to HA service calls instead.
+- **Sigen register map?** Got it from the HA integration source — plant unit 247, writable registers at 40000+, EMS mode at 40031.
+- **Lat/long for open-meteo?** Sydney CBD default is close enough.
+- **Existing HA automation to disable?** Amber SmartShift controls the battery via undocumented API. We don't fight it — agent runs **advisory-only**. The backtest compares what the agent would have done against what SmartShift actually did.
 
 ---
 
@@ -500,4 +523,4 @@ Flat list. Parent: "Built with Opus 4.7 — Sigenergy NEM Arbitrage Agent" proje
 
 ---
 
-*Last updated: 2026-04-23. Keep this doc current or delete it — a stale plan is worse than no plan.*
+*Last updated: 2026-04-23, end of Day 4. Day 5 remaining: record video, fill postmortem, final README pass, submit. 73 tests green, advisory-mode loop runs clean against Immanuel's house.*
