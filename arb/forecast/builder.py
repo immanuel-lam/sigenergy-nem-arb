@@ -22,6 +22,8 @@ def _normalize_prices(price_df: pd.DataFrame) -> pd.DataFrame:
 
     df = price_df.copy()
     df["timestamp"] = pd.to_datetime(df["timestamp"], utc=True)
+    # Amber timestamps are offset by ~1s (e.g. 14:00:01). Round to nearest 5 min.
+    df["timestamp"] = df["timestamp"].dt.round(f"{INTERVAL_MIN}min")
 
     # Amber format has import_c_kwh / export_c_kwh
     if "import_c_kwh" in df.columns:
@@ -69,15 +71,18 @@ def build_forecast(
     else:
         price_df = pd.DataFrame({"timestamp": target_ts})
         prices = prices.set_index("timestamp").sort_index()
-        # Reindex to target, forward-fill beyond forecast horizon
+        # Reindex to target, forward-fill to cover intervals between/beyond price points
         prices_reindexed = prices.reindex(target_ts, method="ffill")
-        # Also backfill in case forecast starts after our start time
+        # Backfill in case forecast starts after our start time
         prices_reindexed = prices_reindexed.bfill()
 
-        n_forecast = prices.index.isin(target_ts).sum()
-        n_filled = n_intervals - n_forecast
-        if n_filled > 0:
-            log.info("Price forecast covers %d intervals, %d intervals forward-filled", n_forecast, n_filled)
+        # Count how many target intervals fall within the price forecast window
+        if len(prices) >= 2:
+            price_start, price_end = prices.index[0], prices.index[-1]
+            n_covered = ((target_ts >= price_start) & (target_ts <= price_end)).sum()
+            n_extrapolated = n_intervals - n_covered
+            log.info("Price forecast covers %d/%d intervals (%s to %s), %d extrapolated",
+                     n_covered, n_intervals, price_start, price_end, n_extrapolated)
 
         price_df["import_c_kwh"] = prices_reindexed["import_c_kwh"].values
         price_df["export_c_kwh"] = prices_reindexed["export_c_kwh"].values
