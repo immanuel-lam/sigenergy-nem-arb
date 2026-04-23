@@ -1,6 +1,8 @@
 # Sigenergy NEM Arbitrage Agent
 
-Autonomous agent that plans battery charge/discharge against live AEMO wholesale prices. Built for the Built with Opus 4.7 hackathon (deadline 2026-04-28). Runs on exactly one house: Immanuel's place in Sydney, with a 64 kWh Sigenergy LFP pack, 2× Sigen inverters, and 24 kWp of solar on an Amber Electric tariff.
+Autonomous agent that plans battery charge/discharge against live AEMO wholesale prices. Built for the Built with Opus 4.7 hackathon (Cerebral Valley, submission deadline 2026-04-26 8 PM EST). Runs on exactly one house: Immanuel's place in Sydney, with a 64 kWh Sigenergy LFP pack, 2× Sigen inverters, and 24 kWp of solar on an Amber Electric tariff.
+
+Licensed MIT. Backend (Python), frontend (Next.js), data, and prompts are all in this repo.
 
 Repo: [github.com/immanuel-lam/sigenergy-nem-arb](https://github.com/immanuel-lam/sigenergy-nem-arb)
 

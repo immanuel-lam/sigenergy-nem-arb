@@ -8,7 +8,19 @@
 
 You are building **an autonomous agent that arbitrages an Australian home battery (Sigenergy) against live AEMO wholesale prices**. The agent re-plans every 30 minutes against updated price forecasts, weather forecasts, and learned household load, then writes the schedule directly to the Sigen inverter over Modbus TCP. It explains every decision in plain English.
 
-The submission is for **Built with Opus 4.7**, a Claude Code virtual hackathon. The judging prize is $100k in API credits. The deadline is **Apr 28, 2026**. Today is **Apr 23, 2026**. You have ~5 working days.
+The submission is for **Built with Opus 4.7**, a Cerebral Valley-hosted hackathon (https://47builders.fyi/details).
+
+**HARD DEADLINE: Sunday Apr 26, 2026, 8 PM EST = Monday Apr 27 ~11 AM AEST.** Today is Apr 23. You have ~3 working days, NOT 5. Submission via the Cerebral Valley platform.
+
+**Prizes:** $50k / $30k / $10k for places 1-3. Three $5k special prizes: "Most Creative Opus 4.7 Exploration", "Keep Thinking", "Best use of Claude Managed Agents".
+
+**Judging weights (matter for prioritisation):**
+- Impact 30% — real-world potential, who benefits, by how much
+- Demo 25% — working, impressive, holds up live
+- Opus 4.7 Use 25% — creative, beyond basic integration, surprises judges
+- Depth & Execution 20% — pushed past first idea
+
+**Mandatory:** fully open source under an OSI-approved licence (MIT — `LICENSE` file in repo root). 3-minute demo video, GitHub repo, written description.
 
 The owner is Immanuel — first-year UTS cybersecurity student, direct/dry communicator, swears occasionally, hates AI-sounding writing. Don't write like a LinkedIn post. Call him by name when addressing him in commit messages or issue comments. He's explicitly the only customer; this runs on his house.
 
