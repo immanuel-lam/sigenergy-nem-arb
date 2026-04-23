@@ -73,9 +73,9 @@ INFO __main__: Rationale: Holding all 2.2 kW of solar into the battery...
 ```
 
 **Narration:**
-> Here's a live cycle. Opus 4.7 reads the plan, the prices, the SOC, and the next six hours of forecast, and writes two sentences. Read it: holding solar in the battery because export is negative right now and there's a 29-cent peak coming. Specific numbers, no fluff.
+> Here's a live cycle. Before calling Opus, the loop builds a structured diff of the new plan versus the last one — which intervals changed action, which didn't — and passes that alongside the actual SOC drift from the previous interval's audit. Opus writes two sentences from that context. Read it: holding solar because export is negative and there's a 29-cent peak later. The numbers are from real plan data, not model inference.
 
-**Words:** 51. Hits Opus 4.7 Use (creative — using it for in-loop reasoning, not just a chat).
+**Words:** 64. Hits Opus 4.7 Use (creative — using it for structured plan reasoning, not just narration).
 
 ---
 
@@ -100,9 +100,9 @@ INFO __main__: Rationale: Holding all 2.2 kW of solar into the battery...
 **Screen:** Click "Inject synthetic spike" button top-right. Animation plays in the middle of the page. Or cut to `http://localhost:3000/replan` for the full-screen version. The 8-second choreographed sequence runs: baseline plan, spike flash at +120 c/kWh, old plan ghosts, new plan draws in cyan/violet, action strip recolours, rationale typewriter-streams.
 
 **Narration:**
-> When new data lands mid-interval, the agent re-plans. Watch: a synthetic 120-cent export spike injected ten minutes out. Agent flips current action from hold-solar to charge-grid, schedules the discharge into the spike window, and Opus 4.7 narrates the change. This is the agentic part. A cron job can't do it.
+> When new data lands mid-interval, the agent re-plans. Watch: a synthetic 120-cent export spike injected ten minutes out. Agent flips from hold-solar to charge-grid. Opus 4.7 gets both the original plan and the new one and has to explain what changed and why — not just narrate the new state. Comparing two plans that disagree on sixty intervals is harder than summarising one. A cron job can't do either.
 
-**Words:** 53. Direct hit on Opus 4.7 Use ("creative, beyond basic integration") and Demo (visual proof).
+**Words:** 65. Direct hit on Opus 4.7 Use (comparative reasoning over plan diffs, not just summarisation) and Demo (visual proof).
 
 ---
 
@@ -129,16 +129,16 @@ B3_amber_actual    $38.66 cost
 
 ### [2:40 – 2:55] Opus 4.7 catches a stale sensor
 
-**Screen:** Terminal 3, cat the rationale log:
+**Screen:** Terminal 3:
 ```bash
-grep "no_data\|stale\|missing" agent_rationale.log execution_audit.log offline_dryrun_rationale.log
+grep "stale\|failed" agent_rationale.log
 ```
-Or point at `docs/best_moments.md`'s Candidate 1 — the 08:30 UTC moment.
+This hits the 07:16 UTC entry: *"prices/load/solar feeds are all stale plus AEMO and weather fetches failed."* Or open `docs/report.html` and scroll to §5 — the verbatim rationale card is there.
 
 **Narration:**
-> One more thing. When the solar sensor went stale at 8:30, the agent dropped hold-solar and went idle, instead of fabricating a plan against missing data. That's what we wanted Opus 4.7 for.
+> One more thing. When every feed went stale — AEMO down, sensors dead — Opus named each one and went idle instead of fabricating a plan. That's the DATA_STALE flag: any source more than 15 minutes old and it reports the gap, doesn't work around it. A model that hallucinates a forecast and arbitrages against it is a real failure mode. This avoids it.
 
-**Words:** 38. Direct hit on Opus 4.7 Use (creative — the report-missing-data behaviour judges specifically called out).
+**Words:** 60. Direct hit on Opus 4.7 Use (hallucination refusal, DATA_STALE mechanism) — the behaviour judges called out specifically.
 
 ---
 
@@ -155,7 +155,7 @@ Or point at `docs/best_moments.md`'s Candidate 1 — the 08:30 UTC moment.
 
 ## Total
 
-~370 narrated words across 3:00. Comfortable pace. Leaves natural pauses.
+~420 narrated words across 3:00. Slightly denser than before — trim in delivery if you're running long. The three Opus 4.7 beats (0:35, 1:35, 2:40) now carry more specifics; it's fine to shorten the close or the backtest narration to compensate.
 
 ---
 

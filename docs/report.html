@@ -390,6 +390,8 @@
     <p class="section-dek">The 30-minute loop, compressed.</p>
     <p>Every 30 minutes the agent runs one cycle: <strong>ingest</strong> Amber prices plus Home Assistant state, <strong>forecast</strong> load and solar out 6 hours, <strong>schedule</strong> via a greedy pair-and-fill ranker over all profitable charge/discharge pairs, <strong>explain</strong> the decision in two sentences through Claude Opus 4.7, and <strong>log</strong> the plan plus rationale. In live-actuation mode a sixth step writes the setpoint to the Sigen Modbus registers. The backtest here runs the first five only.</p>
 
+    <p>The explain step does more than produce a caption. Before calling Opus, the loop builds a structured diff of the new plan versus the previous one — which intervals changed action, which changed energy target, which were untouched — and appends the SOC drift figure from the prior interval's execution audit. Opus receives that diff in context, which is why the rationale quotes specific SOC values and interval prices rather than describing the plan in general terms. Opus 4.7's hallucination resistance is also load-bearing here: a battery scheduler that fabricates a plausible forecast against a stale sensor and then arbitrages against that ghost is a real failure mode. When any data source is more than 15 minutes stale the loop passes a <code>DATA_STALE</code> flag and Opus is instructed to surface it, not work around it.</p>
+
     <svg class="loop-diagram" viewBox="0 0 680 90" width="100%" height="90" role="img" aria-label="Six step loop: ingest, forecast, schedule, explain, actuate, log">
       <defs>
         <marker id="arr" viewBox="0 0 10 10" refX="6" refY="5" markerWidth="6" markerHeight="6" orient="auto">
@@ -481,9 +483,30 @@
 
   <hr class="section-break">
 
-  <!-- SECTION 5 — VERBATIM RATIONALE -->
+  <!-- SECTION 5 — WHY OPUS 4.7 -->
   <section>
-    <h2 class="section"><span class="num">§ 5</span>What the agent said</h2>
+    <h2 class="section"><span class="num">§ 5</span>Why Opus 4.7</h2>
+    <p class="section-dek">Three things this agent does that require a model, not a rule.</p>
+
+    <p>The loop tests every data source against a 15-minute freshness threshold before calling Opus. If any source — HA battery state, AEMO prices, Open-Meteo irradiance, Amber — has not refreshed in that window, the snapshot is flagged <code>DATA_STALE</code> and Opus receives that flag explicitly in its prompt, with an instruction to surface the gap rather than work around it. The entry below is from 07:16 UTC when the AEMO fetch failed and all sensor feeds went stale simultaneously. Opus named every failed source and went idle rather than extrapolating a plan from air. The fallback template — used when the Claude API itself is unreachable — deliberately produces flat, mechanical output so the degradation shows up visibly in the rationale feed rather than silently.</p>
+
+    <div class="rationale-card IDLE">
+      <div class="rationale-meta">
+        <span class="action">IDLE</span> &middot; 2026-04-23T07:16 UTC &middot; stale: prices / load / solar / AEMO / weather
+      </div>
+      <p class="rationale-text">Sitting idle and self-consuming for this 5-minute interval, pulling SOC from 50.0% down to 49.9%. Flat 10 c/kWh both ways for the next 6 hours with no arbitrage spread, and prices/load/solar feeds are all stale plus AEMO and weather fetches failed, so there&#39;s nothing worth cycling the battery for.</p>
+    </div>
+
+    <p>Opus also receives the structured JSON diff of the new plan versus the last — which intervals changed action, which changed energy target, which held — plus the SOC drift figure from the previous interval&#39;s execution audit. This is what gives the rationale specificity rather than generality: &#8220;nudging SOC from 64.5% to 65.1%&#8221; and &#8220;export is literally negative at &minus;0.19 c/kWh (and heading to &minus;9.47)&#8221; come from real plan data passed in context, not from the model inferring what plausibly might have happened. When the numbers in the rationale diverge from the execution audit, that divergence is itself surfaced in the next cycle&#39;s explain prompt.</p>
+
+    <p>When <code>spike_detector.py</code> triggers a mid-interval re-plan &#8212; a price print more than 50 c/kWh above the rolling two-hour median &#8212; Opus receives both the original plan and the revised plan and is asked to explain what changed and why, not just narrate the new state. Summarising a single plan is easy to satisfy with a general description; comparing two plans that disagree on sixty intervals requires the model to understand the arbitrage logic well enough to identify the right axis of difference. The fallback template, used when the API is unreachable, makes the contrast visible: its output is deliberately worse.</p>
+  </section>
+
+  <hr class="section-break">
+
+  <!-- SECTION 6 — VERBATIM RATIONALE -->
+  <section>
+    <h2 class="section"><span class="num">§ 6</span>What the agent said</h2>
     <p class="section-dek">Verbatim entries from <code>agent_rationale.log</code>, selected for specificity.</p>
 
       <div class="rationale-card HOLD_SOLAR">
@@ -520,9 +543,9 @@
 
   <hr class="section-break">
 
-  <!-- SECTION 6 — WHERE THE AGENT WAS WRONG -->
+  <!-- SECTION 7 — WHERE THE AGENT WAS WRONG -->
   <section>
-    <h2 class="section"><span class="num">§ 6</span>Where the agent was wrong</h2>
+    <h2 class="section"><span class="num">§ 7</span>Where the agent was wrong</h2>
     <p class="section-dek">Plan vs actual drift from <code>execution_audit.log</code>.</p>
 
       <p>The 7-day execution audit shows 3 plan vs actual comparisons with 3 classified ok and zero major or minor drift entries. Over a short window in advisory-only mode that is what we expected — the agent publishes plans but does not drive the battery, so most divergence shows up as the plan describing SmartShift&#39;s behaviour rather than overriding it. The next 7 days will be more interesting once we flip to live actuation and have a real plan-vs-outcome series to compare.</p>
@@ -530,9 +553,9 @@
 
   <hr class="section-break">
 
-  <!-- SECTION 7 — THE SPIKE WE DIDN'T SEE -->
+  <!-- SECTION 8 — THE SPIKE WE DIDN'T SEE -->
   <section>
-    <h2 class="section"><span class="num">§ 7</span>The price spike we didn't see</h2>
+    <h2 class="section"><span class="num">§ 8</span>The price spike we didn't see</h2>
     <p class="section-dek">Thirty-day scan of Amber history for price excursions.</p>
 
     <p>A scan of the last 30 days of Amber data at a 20 c/kWh deviation-from-rolling-median threshold turned up <strong>0</strong> real spike events on this meter. NSW1 spent April trading in a quiet range; no FCAS lockouts, no evening caps, no negative-price storms lasting long enough to flip the arbitrage signal materially.</p>
@@ -543,9 +566,9 @@
 
   <hr class="section-break">
 
-  <!-- SECTION 8 — CAVEATS -->
+  <!-- SECTION 9 — CAVEATS -->
   <section>
-    <h2 class="section"><span class="num">§ 8</span>Caveats and limits</h2>
+    <h2 class="section"><span class="num">§ 9</span>Caveats and limits</h2>
     <p class="section-dek">What this number does and doesn't prove.</p>
 
     <ul class="caveats">
