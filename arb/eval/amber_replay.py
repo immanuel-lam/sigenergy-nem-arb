@@ -122,14 +122,21 @@ def reconstruct_amber_actions(
 
     price_df = _prepare_prices(prices)
 
-    # merge_asof with 5-min tolerance — prices may be offset by ~1s.
-    merged = pd.merge_asof(
-        hist,
-        price_df,
-        on="timestamp",
-        direction="nearest",
-        tolerance=pd.Timedelta(minutes=INTERVAL_MIN),
-    )
+    # merge_asof requires both sides to share the same datetime dtype on the key.
+    # If price_df is empty (no price data), skip the merge and fill with NaN.
+    if price_df.empty or len(price_df) == 0:
+        merged = hist.copy()
+        merged["import_c_kwh"] = np.nan
+        merged["export_c_kwh"] = np.nan
+    else:
+        price_df["timestamp"] = pd.to_datetime(price_df["timestamp"], utc=True)
+        merged = pd.merge_asof(
+            hist,
+            price_df,
+            on="timestamp",
+            direction="nearest",
+            tolerance=pd.Timedelta(minutes=INTERVAL_MIN),
+        )
 
     # Fill missing prices with 0 so cost accounting doesn't blow up, but log loudly.
     n_missing = merged["import_c_kwh"].isna().sum()

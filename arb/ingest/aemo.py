@@ -90,8 +90,9 @@ def _parse_5mpd_csv(csv_text: str) -> pd.DataFrame:
     if df.empty:
         return pd.DataFrame()
 
-    # INTERVAL_DATETIME is the timestamp for each 5-min interval
-    df["timestamp"] = pd.to_datetime(df["INTERVAL_DATETIME"])
+    # INTERVAL_DATETIME is the timestamp for each 5-min interval.
+    # Use errors='coerce' so malformed timestamps become NaT (dropped by dropna below).
+    df["timestamp"] = pd.to_datetime(df["INTERVAL_DATETIME"], errors="coerce")
     # AEMO timestamps are AEST (UTC+10)
     df["timestamp"] = df["timestamp"].dt.tz_localize("Australia/Sydney").dt.tz_convert("UTC")
     df["rrp_mwh"] = pd.to_numeric(df["RRP"], errors="coerce")

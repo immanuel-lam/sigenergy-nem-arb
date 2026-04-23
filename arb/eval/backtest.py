@@ -78,33 +78,45 @@ def _build_forecast_at(
     )
 
     # --- Prices ---
+    prices_ok = prices is not None and not prices.empty and "timestamp" in prices.columns
+
     if perfect_foresight:
-        # Use actual prices at/after decision_ts as the forecast.
-        px = prices.copy()
-        px["timestamp"] = pd.to_datetime(px["timestamp"], utc=True)
-        price_col = "rrp_c_kwh" if "rrp_c_kwh" in px.columns else "import_c_kwh"
-        px = px.set_index("timestamp").sort_index()
-        # Reindex to target timestamps with nearest match (5-min tolerance)
-        future_prices = px.reindex(target_ts, method="nearest", tolerance=pd.Timedelta(minutes=5))
-        import_forecast = future_prices[price_col].ffill().bfill().fillna(10.0).values
-        export_col = "export_c_kwh" if "export_c_kwh" in px.columns else price_col
-        if export_col in future_prices.columns:
-            export_forecast = future_prices[export_col].ffill().bfill().fillna(10.0).values
+        if not prices_ok:
+            import_forecast = np.full(n_intervals, 10.0)
+            export_forecast = np.full(n_intervals, 10.0)
         else:
-            export_forecast = import_forecast
+            # Use actual prices at/after decision_ts as the forecast.
+            px = prices.copy()
+            px["timestamp"] = pd.to_datetime(px["timestamp"], utc=True)
+            price_col = "rrp_c_kwh" if "rrp_c_kwh" in px.columns else "import_c_kwh"
+            px = px.set_index("timestamp").sort_index()
+            # Reindex to target timestamps with nearest match (5-min tolerance)
+            future_prices = px.reindex(target_ts, method="nearest", tolerance=pd.Timedelta(minutes=5))
+            import_forecast = future_prices[price_col].ffill().bfill().fillna(10.0).values
+            export_col = "export_c_kwh" if "export_c_kwh" in px.columns else price_col
+            if export_col in future_prices.columns:
+                export_forecast = future_prices[export_col].ffill().bfill().fillna(10.0).values
+            else:
+                export_forecast = import_forecast
     else:
-        # Persistence: last known price before decision_ts.
-        price_history = prices[prices["timestamp"] < decision_ts]
-        if price_history.empty:
-            last_price = 10.0
+        if not prices_ok:
+            import_forecast = np.full(n_intervals, 10.0)
+            export_forecast = np.full(n_intervals, 10.0)
         else:
-            price_col = "rrp_c_kwh" if "rrp_c_kwh" in price_history.columns else "import_c_kwh"
-            last_price = float(price_history[price_col].iloc[-1])
-        import_forecast = np.full(n_intervals, last_price)
-        export_forecast = np.full(n_intervals, last_price)
+            # Persistence: last known price before decision_ts.
+            price_history = prices[prices["timestamp"] < decision_ts]
+            if price_history.empty:
+                last_price = 10.0
+            else:
+                price_col = "rrp_c_kwh" if "rrp_c_kwh" in price_history.columns else "import_c_kwh"
+                last_price = float(price_history[price_col].iloc[-1])
+            import_forecast = np.full(n_intervals, last_price)
+            export_forecast = np.full(n_intervals, last_price)
 
     # --- Load / solar: look back 4 weeks and average same-time samples. ---
-    past_hist = history[history["timestamp"] < decision_ts]
+    # Guard: empty history (no columns) must not crash on column access.
+    history_ok = history is not None and not history.empty and "timestamp" in history.columns
+    past_hist = history[history["timestamp"] < decision_ts] if history_ok else pd.DataFrame()
     load_forecast = np.full(n_intervals, np.nan)
     solar_forecast = np.full(n_intervals, np.nan)
 

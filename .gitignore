@@ -32,6 +32,7 @@ Thumbs.db
 .previous_plan.pkl
 .previous_soc.txt
 offline_dryrun_plans.jsonl
+.claude/
 
 # Virtual env
 .venv/

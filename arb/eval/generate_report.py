@@ -194,7 +194,8 @@ def _run_backtests(days: int) -> BacktestBundle:
             amber_cost=None, error="empty history or prices",
         )
 
-    initial_soc = (history["soc_pct"].dropna().iloc[0] if not history.empty else 50.0) / 100.0
+    soc_series = history["soc_pct"].dropna() if (not history.empty and "soc_pct" in history.columns) else pd.Series(dtype=float)
+    initial_soc = (float(soc_series.iloc[0]) if soc_series.size else 50.0) / 100.0
 
     strategies = [
         ("agent_greedy", "Agent (greedy)", schedule),

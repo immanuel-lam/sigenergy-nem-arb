@@ -273,6 +273,9 @@ def main():
     spikes = find_spikes(prices, threshold_c_kwh=args.threshold)
     print(f"Found {len(spikes)} spikes in ~{args.days} days of data "
           f"({len(prices)} intervals covered).")
+    if not spikes:
+        print(f"No spikes above {args.threshold:.1f} c/kWh threshold.")
+        return
     print(f"Top {args.top}:")
     for s in spikes[: args.top]:
         print(

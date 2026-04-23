@@ -70,7 +70,8 @@ Open http://localhost:3000.
 
 - **"Inject synthetic spike"** button (top-right): POSTs `/spike-demo` to the backend. Runs the greedy scheduler twice — once normally, once with a synthetic +120 c/kWh export spike injected 10 min in the future. The response has both plans, and the `<ReplanSection>` below plays the signature animation showing the agent react. This is THE demo moment.
 - **`/replan` page** (standalone): http://localhost:3000/replan. Full-viewport, dark, no header. Loops the re-plan animation every ~10 seconds. Press space to replay immediately. Use for b-roll in the video.
-- **Static report**: open `docs/report.html` directly in a browser (no server needed). It's a 269 KB single-page document with the backtest, architecture, and Opus 4.7-authored prose. This is a submission artifact — link it from your hackathon entry.
+- **Static report**: open `docs/report.html` directly in a browser (no server needed). It's a ~270 KB single-page document with the backtest, architecture, and Opus 4.7-authored prose. This is a submission artifact — link it from your hackathon entry.
+- **Impact analysis**: `docs/impact.md` — scale numbers for the submission form, with citations.
 
 ## Architecture
 
@@ -110,7 +111,8 @@ Shipped:
 - Next.js dashboard with custom dark theme, Recharts, Framer Motion, SWR
 - Signature re-plan animation: standalone `/replan` page for demo recording
 - Static HTML report: `docs/report.html` with backtest results and Opus 4.7 prose
-- 99 tests, all passing
+- Scale / Impact analysis: `docs/impact.md` (~$12.5M AUD/year conservative aggregate across Amber-style spot-tariff households)
+- 146 tests, all passing (39 new edge-case tests added in the final hardening pass)
 
 Also shipped:
 - Spike detection + mid-interval re-plan (`arb/agent/spike_detector.py`): continuous loop polls every 5 min, triggers full cycle on CAP/MAJOR/MINOR deviations from the plan's assumed prices. 10-min cooldown. Synthetic demo in `arb/agent/spike_demo.py` because NSW1 had no real spikes in the last 30 days.
