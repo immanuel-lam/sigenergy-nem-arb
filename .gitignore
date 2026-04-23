@@ -28,6 +28,11 @@ Thumbs.db
 *.log
 !tests/**/*.log
 
+# Agent state
+.previous_plan.pkl
+.previous_soc.txt
+offline_dryrun_plans.jsonl
+
 # Virtual env
 .venv/
 venv/

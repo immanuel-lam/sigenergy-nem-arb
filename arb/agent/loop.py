@@ -2,15 +2,22 @@
 from __future__ import annotations
 
 import argparse
+import json
 import logging
 import os
+import pickle
+import signal
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 
+from arb.agent.audit import audit_current_interval
 from arb.agent.explain import explain_plan
+from arb.agent.plan_diff import diff_plans, format_diff_short
 from arb.forecast.builder import build_forecast
+from arb.ingest import ha
 from arb.ingest.snapshot import take_snapshot
-from arb.scheduler.constants import INTERVAL_MIN, BatteryConstants
+from arb.scheduler.constants import INTERVAL_MIN, LOOP_PERIOD_MIN, BatteryConstants
 from arb.scheduler.greedy import schedule
 from arb.scheduler.plan import Action
 
@@ -19,6 +26,52 @@ log = logging.getLogger(__name__)
 DRY_RUN = os.getenv("DRY_RUN", "true").lower() in ("true", "1", "yes")
 KILL_SWITCH = os.getenv("ARB_KILL", "0") == "1"
 RATIONALE_LOG = Path(os.getenv("ARB_RATIONALE_LOG", "agent_rationale.log"))
+PREVIOUS_PLAN_PATH = Path(os.getenv("ARB_PREVIOUS_PLAN", ".previous_plan.pkl"))
+PREVIOUS_SOC_PATH = Path(os.getenv("ARB_PREVIOUS_SOC", ".previous_soc.txt"))
+
+_shutdown = False
+
+
+def _handle_shutdown(signum, frame) -> None:
+    global _shutdown
+    log.info("Received signal %d, shutting down after current cycle", signum)
+    _shutdown = True
+
+
+def _load_previous_plan():
+    """Load the last plan from disk, if any."""
+    if not PREVIOUS_PLAN_PATH.exists():
+        return None
+    try:
+        with PREVIOUS_PLAN_PATH.open("rb") as fh:
+            return pickle.load(fh)
+    except Exception as e:
+        log.warning("Failed to load previous plan: %s", e)
+        return None
+
+
+def _save_plan(plan) -> None:
+    try:
+        with PREVIOUS_PLAN_PATH.open("wb") as fh:
+            pickle.dump(plan, fh)
+    except Exception as e:
+        log.error("Failed to save plan: %s", e)
+
+
+def _load_previous_soc() -> float | None:
+    if not PREVIOUS_SOC_PATH.exists():
+        return None
+    try:
+        return float(PREVIOUS_SOC_PATH.read_text().strip())
+    except Exception:
+        return None
+
+
+def _save_soc(soc_pct: float) -> None:
+    try:
+        PREVIOUS_SOC_PATH.write_text(f"{soc_pct:.4f}\n")
+    except Exception as e:
+        log.error("Failed to save SOC: %s", e)
 
 
 def run_once(dry_run: bool = True, force: bool = False) -> None:
@@ -37,7 +90,6 @@ def run_once(dry_run: bool = True, force: bool = False) -> None:
         return
     elif snapshot.is_stale():
         log.warning("Stale sensors: %s — continuing anyway (--force)", snapshot.stale_sensors)
-        # Default SOC to 50% if unknown
         if snapshot.soc_pct is None:
             snapshot.soc_pct = 50.0
             log.warning("SOC unknown, defaulting to 50%%")
@@ -46,7 +98,6 @@ def run_once(dry_run: bool = True, force: bool = False) -> None:
     log.info("=== Building forecast ===")
     ha_history = None
     try:
-        from arb.ingest import ha
         ha_history = ha.fetch_history(days=30)
     except Exception as e:
         log.warning("HA history unavailable, using flat load profile: %s", e)
@@ -63,7 +114,29 @@ def run_once(dry_run: bool = True, force: bool = False) -> None:
     plan = schedule(forecast_df, soc_now)
     log.info(plan.summary())
 
-    # 4. Actuate
+    # 4. Diff against previous plan
+    previous_plan = _load_previous_plan()
+    plan_diff = diff_plans(plan, previous_plan)
+    log.info("Plan diff: %s", format_diff_short(plan_diff))
+
+    # 5. Audit what actually happened since last cycle
+    prior_soc = _load_previous_soc()
+    if previous_plan is not None:
+        ha_state = {
+            "soc_pct": snapshot.soc_pct,
+            "load_kw": snapshot.load_kw,
+            "solar_kw": snapshot.solar_kw,
+            "battery_power_kw": snapshot.battery_power_kw,
+        }
+        audit_entry = audit_current_interval(
+            plan=previous_plan,
+            current_ha_state=ha_state,
+            prior_soc_pct=prior_soc,
+        )
+        log.info("Audit: status=%s drift=%s", audit_entry.status,
+                 f"{audit_entry.soc_delta_pct:+.1f}%" if audit_entry.soc_delta_pct is not None else "n/a")
+
+    # 6. Actuate (advisory mode — writes go through ha_control with DRY_RUN)
     idx = plan.current_interval_idx
     if idx is not None:
         action = plan.actions[idx]
@@ -79,10 +152,9 @@ def run_once(dry_run: bool = True, force: bool = False) -> None:
             plan.import_c_kwh[idx], plan.export_c_kwh[idx],
         )
 
-        # Generate rationale (uses Claude Opus 4.7 via explain_plan; falls back
-        # to a templated string if no API key or network error)
+        # Generate rationale with diff context
         log.info("=== Explaining decision ===")
-        rationale = explain_plan(plan, snapshot, previous_plan=None)
+        rationale = explain_plan(plan, snapshot, previous_plan=previous_plan)
         log.info("Rationale: %s", rationale)
         _persist_rationale(snapshot.timestamp, action, rationale)
 
@@ -98,6 +170,11 @@ def run_once(dry_run: bool = True, force: bool = False) -> None:
     else:
         log.warning("Current time is outside the plan horizon")
 
+    # 7. Persist state for next cycle
+    _save_plan(plan)
+    if snapshot.soc_pct is not None:
+        _save_soc(snapshot.soc_pct)
+
 
 def _persist_rationale(ts: datetime, action: Action, rationale: str) -> None:
     """Append a single-line rationale entry to the audit log."""
@@ -105,15 +182,44 @@ def _persist_rationale(ts: datetime, action: Action, rationale: str) -> None:
         line = f"{ts.isoformat()}\t{action.value}\t{rationale}\n"
         with RATIONALE_LOG.open("a", encoding="utf-8") as fh:
             fh.write(line)
-    except Exception as e:  # noqa: BLE001 — logging must never crash the loop
+    except Exception as e:
         log.error("Failed to persist rationale: %s", e)
+
+
+def run_continuous(dry_run: bool = True, force: bool = False,
+                   period_min: int = LOOP_PERIOD_MIN) -> None:
+    """Run the agent loop every `period_min` minutes until shutdown signal."""
+    signal.signal(signal.SIGTERM, _handle_shutdown)
+    signal.signal(signal.SIGINT, _handle_shutdown)
+
+    log.info("Continuous loop started (period %d min, dry_run=%s)", period_min, dry_run)
+    while not _shutdown:
+        cycle_start = time.monotonic()
+        try:
+            run_once(dry_run=dry_run, force=force)
+        except Exception as e:
+            log.exception("Cycle failed: %s", e)
+
+        # Sleep until next cycle, checking shutdown every 5s
+        elapsed = time.monotonic() - cycle_start
+        sleep_total = max(0, period_min * 60 - elapsed)
+        log.info("Cycle done in %.1fs, sleeping %.0fs", elapsed, sleep_total)
+        slept = 0
+        while slept < sleep_total and not _shutdown:
+            time.sleep(min(5, sleep_total - slept))
+            slept += 5
+
+    log.info("Continuous loop exited cleanly")
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Sigenergy NEM arbitrage agent")
     parser.add_argument("--once", action="store_true", help="Run one cycle and exit")
+    parser.add_argument("--continuous", action="store_true", help="Run every 30 min until killed")
     parser.add_argument("--dry-run", action="store_true", default=True, help="Don't write to inverter")
     parser.add_argument("--force", action="store_true", help="Run even with stale/missing sensors")
+    parser.add_argument("--period-min", type=int, default=LOOP_PERIOD_MIN,
+                        help="Loop period in minutes (continuous mode)")
     args = parser.parse_args()
 
     logging.basicConfig(
@@ -122,10 +228,9 @@ def main() -> None:
         datefmt="%H:%M:%S",
     )
 
-    if args.once:
-        run_once(dry_run=args.dry_run, force=args.force)
+    if args.continuous:
+        run_continuous(dry_run=args.dry_run, force=args.force, period_min=args.period_min)
     else:
-        log.info("Continuous loop not yet implemented (Day 3). Running once.")
         run_once(dry_run=args.dry_run, force=args.force)
 
 
