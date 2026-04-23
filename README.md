@@ -32,6 +32,16 @@ Agent beats static TOU by **$13.33/day** and Amber's actual dispatch by **$5.91/
 
 The Amber comparison is reconstructed from HA history (`arb/eval/amber_replay.py`) and should be read as indicative — Amber optimises for things we don't model, like network peak tariffs.
 
+## Web UI
+
+FastAPI backend on port 8000, Next.js dashboard on port 3000. Both read the same persisted plan and logs the agent loop writes — no separate data store.
+
+Dashboard panels: SOC gauge, 24h price and action chart, current status strip, rationale feed, backtest results table, sensor data quality pills. The "Inject synthetic spike" button calls `POST /spike-demo`, which runs the greedy scheduler against a synthetic 120 c/kWh price spike and returns both plans. The diff and the re-plan animation appear below without a page reload.
+
+`http://localhost:3000/replan` is a standalone full-viewport page that loops the re-plan animation. Use it for demo b-roll — space bar replays it.
+
+`docs/report.html` (269 KB) is the submission-grade HTML artifact: backtest results, architecture walkthrough, and Opus 4.7 prose explanation. Open it in a browser; no server needed.
+
 ## Architecture
 
 ```
@@ -42,11 +52,11 @@ ingest/       forecast/     scheduler/    actuator/
   ha.py
   snapshot.py
 
-agent/          eval/           demo/
-  loop.py         backtest.py     dashboard.py  (Streamlit)
-  explain.py      baselines.py
-  plan_diff.py    amber_replay.py
-  audit.py        offline_dryrun.py
+agent/          eval/           api/              web/
+  loop.py         backtest.py     server.py         app/page.tsx
+  explain.py      baselines.py    (FastAPI)         app/replan/page.tsx
+  plan_diff.py    amber_replay.py                   components/
+  audit.py        offline_dryrun.py                 hooks/useLiveData.ts
                   run_backtest.py
 ```
 
@@ -66,13 +76,19 @@ Shipped:
 - Backtest: no-look-ahead replay with perfect-foresight toggle, self-consume in the sim layer
 - Baselines: B1 self-consume, B2 static TOU, B3 Amber actual reconstruction
 - Offline 24h dry-run: replays last N hours through the live pipeline
-- Streamlit dashboard: live SOC gauge, 24h chart, backtest panel, rationale log
-- 73 tests, all passing
+- FastAPI backend (`arb/api/server.py`): 6 tests, read-only, WebSocket tick
+- Next.js dashboard with custom dark theme, Recharts, Framer Motion, SWR
+- Signature re-plan animation: standalone `/replan` page for demo recording
+- Static HTML report: `docs/report.html` with backtest results and Opus 4.7 prose
+- 99 tests, all passing
+
+Also shipped:
+- Spike detection + mid-interval re-plan (`arb/agent/spike_detector.py`): continuous loop polls every 5 min, triggers full cycle on CAP/MAJOR/MINOR deviations from the plan's assumed prices. 10-min cooldown. Synthetic demo in `arb/agent/spike_demo.py` because NSW1 had no real spikes in the last 30 days.
 
 Not shipped:
 - HA heartbeat sensor. Kill switch works via env but no external liveness signal.
 - Sensitivity analysis (capacity sweep, cycle cost calibration) — brainstormed, not built.
-- Mid-interval re-plan on price spikes. The 30-min cadence is fine for Amber but a real cap event ($17.50/kWh) would need faster reaction.
+- Real NSW price cap captured live — none happened in the demo window.
 
 ## Hardware and assumptions
 
@@ -104,7 +120,12 @@ python -m arb.agent.loop --once             # one cycle, dry-run by default
 python -m arb.agent.loop --continuous       # keep going every 30 min
 python -m arb.eval.run_backtest 7           # 7-day backtest, all strategies
 python -m arb.eval.offline_dryrun 24        # replay last 24h at 30-min cadence
-streamlit run arb/demo/dashboard.py         # live dashboard
+
+# Backend API
+uvicorn arb.api.server:app --port 8000
+
+# Frontend (separate terminal)
+cd web && npm install && npm run dev
 ```
 
 ## Safety
