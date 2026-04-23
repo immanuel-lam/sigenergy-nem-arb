@@ -14,6 +14,7 @@ from pathlib import Path
 from arb.agent.audit import audit_current_interval
 from arb.agent.explain import explain_plan
 from arb.agent.plan_diff import diff_plans, format_diff_short
+from arb.agent.spike_detector import detect_spike, format_spike_for_log
 from arb.forecast.builder import build_forecast
 from arb.ingest import ha
 from arb.ingest.snapshot import take_snapshot
@@ -28,6 +29,10 @@ KILL_SWITCH = os.getenv("ARB_KILL", "0") == "1"
 RATIONALE_LOG = Path(os.getenv("ARB_RATIONALE_LOG", "agent_rationale.log"))
 PREVIOUS_PLAN_PATH = Path(os.getenv("ARB_PREVIOUS_PLAN", ".previous_plan.pkl"))
 PREVIOUS_SOC_PATH = Path(os.getenv("ARB_PREVIOUS_SOC", ".previous_soc.txt"))
+SPIKE_LOG = Path(os.getenv("ARB_SPIKE_LOG", "spike_events.log"))
+
+# Min seconds between spike-triggered re-plans (rate limit)
+SPIKE_COOLDOWN_SEC = 600  # 10 min
 
 _shutdown = False
 
@@ -186,25 +191,73 @@ def _persist_rationale(ts: datetime, action: Action, rationale: str) -> None:
         log.error("Failed to persist rationale: %s", e)
 
 
+def _poll_for_spike(poll_minutes: int = 5) -> object | None:
+    """Cheap snapshot + spike check. Returns SpikeEvent or None."""
+    try:
+        snap = take_snapshot()
+    except Exception as e:
+        log.warning("Spike poll snapshot failed: %s", e)
+        return None
+    prev_plan = _load_previous_plan()
+    if prev_plan is None:
+        return None
+    return detect_spike(snap, prev_plan)
+
+
+def _log_spike(event: object) -> None:
+    """Append a spike event to the spike log."""
+    try:
+        line = format_spike_for_log(event) + "\n"
+        with SPIKE_LOG.open("a", encoding="utf-8") as fh:
+            fh.write(line)
+    except Exception as e:
+        log.error("Failed to log spike: %s", e)
+
+
 def run_continuous(dry_run: bool = True, force: bool = False,
-                   period_min: int = LOOP_PERIOD_MIN) -> None:
-    """Run the agent loop every `period_min` minutes until shutdown signal."""
+                   period_min: int = LOOP_PERIOD_MIN,
+                   spike_poll_min: int = 5) -> None:
+    """Run the agent loop every `period_min` minutes until shutdown signal.
+
+    Also polls for price spikes every `spike_poll_min` minutes between full
+    cycles. If a spike is detected and the cooldown has elapsed, triggers an
+    immediate full cycle instead of waiting for the next scheduled one.
+    """
     signal.signal(signal.SIGTERM, _handle_shutdown)
     signal.signal(signal.SIGINT, _handle_shutdown)
 
-    log.info("Continuous loop started (period %d min, dry_run=%s)", period_min, dry_run)
-    while not _shutdown:
-        cycle_start = time.monotonic()
-        try:
-            run_once(dry_run=dry_run, force=force)
-        except Exception as e:
-            log.exception("Cycle failed: %s", e)
+    log.info("Continuous loop started (period %d min, spike poll %d min, dry_run=%s)",
+             period_min, spike_poll_min, dry_run)
 
-        # Sleep until next cycle, checking shutdown every 5s
-        elapsed = time.monotonic() - cycle_start
-        sleep_total = max(0, period_min * 60 - elapsed)
-        log.info("Cycle done in %.1fs, sleeping %.0fs", elapsed, sleep_total)
-        slept = 0
+    last_full_cycle = 0.0
+    while not _shutdown:
+        now = time.monotonic()
+        since_full = now - last_full_cycle
+        scheduled_due = since_full >= period_min * 60
+
+        spike_event = None
+        if not scheduled_due and since_full >= SPIKE_COOLDOWN_SEC:
+            spike_event = _poll_for_spike(poll_minutes=spike_poll_min)
+
+        trigger = None
+        if scheduled_due:
+            trigger = "scheduled"
+        elif spike_event is not None:
+            trigger = f"spike ({format_spike_for_log(spike_event)})"
+            _log_spike(spike_event)
+            log.warning("Spike-triggered re-plan: %s", format_spike_for_log(spike_event))
+
+        if trigger is not None:
+            log.info("=== Cycle trigger: %s ===", trigger)
+            try:
+                run_once(dry_run=dry_run, force=force)
+            except Exception as e:
+                log.exception("Cycle failed: %s", e)
+            last_full_cycle = time.monotonic()
+
+        # Sleep until next poll, checking shutdown every 5s
+        sleep_total = spike_poll_min * 60
+        slept = 0.0
         while slept < sleep_total and not _shutdown:
             time.sleep(min(5, sleep_total - slept))
             slept += 5
@@ -220,6 +273,8 @@ def main() -> None:
     parser.add_argument("--force", action="store_true", help="Run even with stale/missing sensors")
     parser.add_argument("--period-min", type=int, default=LOOP_PERIOD_MIN,
                         help="Loop period in minutes (continuous mode)")
+    parser.add_argument("--spike-poll-min", type=int, default=5,
+                        help="Price spike poll interval in minutes (continuous mode)")
     args = parser.parse_args()
 
     logging.basicConfig(
@@ -229,7 +284,9 @@ def main() -> None:
     )
 
     if args.continuous:
-        run_continuous(dry_run=args.dry_run, force=args.force, period_min=args.period_min)
+        run_continuous(dry_run=args.dry_run, force=args.force,
+                       period_min=args.period_min,
+                       spike_poll_min=args.spike_poll_min)
     else:
         run_once(dry_run=args.dry_run, force=args.force)
 
