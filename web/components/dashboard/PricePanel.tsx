@@ -97,11 +97,18 @@ export function PricePanel() {
     return out;
   }, [rows]);
 
-  const currentTs = plan && plan.current_idx >= 0 && plan.current_idx < rows.length
-    ? rows[plan.current_idx].ts
-    : null;
+  const currentTs =
+    plan &&
+    typeof plan.current_idx === "number" &&
+    plan.current_idx >= 0 &&
+    plan.current_idx < rows.length
+      ? rows[plan.current_idx].ts
+      : null;
 
-  const currentAction = plan?.actions[plan?.current_idx ?? 0] ?? null;
+  const currentAction =
+    plan && typeof plan.current_idx === "number"
+      ? plan.actions[plan.current_idx] ?? null
+      : null;
 
   if (isLoading && !plan) {
     return (

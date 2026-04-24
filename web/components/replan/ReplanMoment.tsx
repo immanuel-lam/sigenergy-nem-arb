@@ -90,14 +90,12 @@ export function ReplanMoment({
   const n = baseline.timestamps.length;
   const segW = innerW / n;
 
-  // Find spike interval indices.
-  const spikeStartIdx = Math.max(
-    0,
-    baseline.timestamps.findIndex((t) => t === spike.start_ts)
-  );
+  // Find spike interval indices. Use nearest-match because spike_start/end are
+  // floored to minute precision while plan timestamps have sub-second precision.
+  const spikeStartIdx = nearestTsIdx(baseline.timestamps, spike.start_ts);
   const spikeEndIdx = Math.max(
     spikeStartIdx,
-    baseline.timestamps.findIndex((t) => t === spike.end_ts)
+    nearestTsIdx(baseline.timestamps, spike.end_ts)
   );
 
   // Start / stop / loop loop.
@@ -427,6 +425,22 @@ function arbKwh(
   }
   // Each interval = 5 min, average power 15 kW = 1.25 kWh. Halve because charges cancel discharges in count.
   return (delta * 1.25) / 2;
+}
+
+/** Return the index of the timestamp in `arr` closest to `target`. */
+function nearestTsIdx(arr: string[], target: string): number {
+  if (!arr.length) return 0;
+  const targetMs = new Date(target).getTime();
+  let best = 0;
+  let bestDist = Math.abs(new Date(arr[0]).getTime() - targetMs);
+  for (let i = 1; i < arr.length; i++) {
+    const dist = Math.abs(new Date(arr[i]).getTime() - targetMs);
+    if (dist < bestDist) {
+      bestDist = dist;
+      best = i;
+    }
+  }
+  return best;
 }
 
 function shortTime(iso: string): string {

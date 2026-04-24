@@ -44,7 +44,7 @@ export type Plan = {
   solar_kw: number[];
   charge_grid_kwh: number[];
   discharge_grid_kwh: number[];
-  current_idx: number;
+  current_idx: number | null;
   summary: Record<string, unknown>;
   created_at: string | null;
 };
@@ -89,24 +89,35 @@ export type BacktestResult = {
 
 const fetcher = <T>(path: string) => api<T>(path);
 
+// Shared SWR defaults: keep previous data during revalidation so panels don't
+// flash skeletons, and never revalidate on focus (the dashboard is usually
+// a pinned tab during a demo).
+const SWR_COMMON = {
+  revalidateOnFocus: false,
+  keepPreviousData: true,
+} as const;
+
 export function useSnapshot() {
   return useSWR<Snapshot>("/snapshot", fetcher, {
-    refreshInterval: 10_000,
-    revalidateOnFocus: false,
+    ...SWR_COMMON,
+    refreshInterval: 20_000,
   });
 }
 
 export function usePlan() {
+  // Plan only changes when the agent loop runs (every 30 min) or someone
+  // hits /plan/refresh. Polling every minute is plenty — faster polling
+  // just triggers unnecessary Recharts re-renders of 288-point series.
   return useSWR<Plan>("/plan/current", fetcher, {
-    refreshInterval: 30_000,
-    revalidateOnFocus: false,
+    ...SWR_COMMON,
+    refreshInterval: 60_000,
   });
 }
 
 export function useRationale(limit = 10) {
   return useSWR<RationaleEntry[]>(`/rationale?limit=${limit}`, fetcher, {
-    refreshInterval: 15_000,
-    revalidateOnFocus: false,
+    ...SWR_COMMON,
+    refreshInterval: 30_000,
   });
 }
 
@@ -114,21 +125,21 @@ export function useAudit(limit = 10) {
   return useSWR<{ entries: AuditEntry[]; summary: Record<string, unknown> }>(
     `/audit?limit=${limit}`,
     fetcher,
-    { refreshInterval: 30_000, revalidateOnFocus: false },
+    { ...SWR_COMMON, refreshInterval: 60_000 },
   );
 }
 
 export function useSpikeEvents(limit = 10) {
   return useSWR<{ raw: string }[]>(`/spike-events?limit=${limit}`, fetcher, {
+    ...SWR_COMMON,
     refreshInterval: 60_000,
-    revalidateOnFocus: false,
   });
 }
 
 export function useBacktest() {
   return useSWR<BacktestResult>("/backtest/latest", fetcher, {
     // backtest is expensive — don't auto-refetch.
-    revalidateOnFocus: false,
+    ...SWR_COMMON,
     revalidateIfStale: false,
     revalidateOnReconnect: false,
   });
@@ -136,7 +147,7 @@ export function useBacktest() {
 
 export function useHealth() {
   return useSWR<{ ok: boolean; version: string }>("/health", fetcher, {
-    refreshInterval: 30_000,
-    revalidateOnFocus: false,
+    ...SWR_COMMON,
+    refreshInterval: 60_000,
   });
 }

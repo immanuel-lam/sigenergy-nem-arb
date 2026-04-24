@@ -56,10 +56,15 @@ def fetch_prices(site_id: str | None = None) -> pd.DataFrame:
     if site_id is None:
         return pd.DataFrame()
 
-    url = f"{AMBER_API_BASE}/sites/{site_id}/prices"
-    params = {"resolution": 5}  # 5-min intervals
+    # /prices/current returns a rolling window — `next` intervals forward +
+    # `previous` backward from now. 288 × 5 min = 24h of forecast, which
+    # rolls past midnight automatically. The plain /prices endpoint defaults
+    # to today-only (local midnight to midnight), so a 10pm call there
+    # would only return 2 hours of forecast.
+    url = f"{AMBER_API_BASE}/sites/{site_id}/prices/current"
+    params = {"resolution": 5, "next": 288, "previous": 12}
 
-    log.info("Fetching Amber prices for site %s", site_id)
+    log.info("Fetching Amber prices (rolling 24h) for site %s", site_id)
     resp = requests.get(url, headers=_headers(), params=params, timeout=30)
     resp.raise_for_status()
     data = resp.json()

@@ -195,19 +195,28 @@ def run_spike_demo(
     duration_min: int = 15,
     channel: Literal["import", "export"] = "import",
     skip_llm: bool = False,
+    snapshot: Snapshot | None = None,
+    history: pd.DataFrame | None = None,
 ) -> SpikeDemoResult:
-    """Run the full demo: baseline plan, inject spike, re-plan, diff."""
-    log.info("Taking live snapshot")
-    snapshot = take_snapshot()
-    log.info("Snapshot:\n%s", snapshot.summary())
+    """Run the full demo: baseline plan, inject spike, re-plan, diff.
 
-    # Pull history for the load forecaster. Failure here is fine — builder
-    # has a fallback, we just lose some accuracy.
-    try:
-        history = ha.fetch_history(days=14)
-    except Exception as e:  # noqa: BLE001
-        log.warning("HA history fetch failed (%s); proceeding without", e)
-        history = pd.DataFrame()
+    If snapshot and history are passed in, the slow ingest steps are skipped —
+    the caller is responsible for freshness. Used by the API to reuse the
+    cache primed by /plan/refresh so the demo button feels snappy.
+    """
+    if snapshot is None:
+        log.info("Taking live snapshot")
+        snapshot = take_snapshot()
+        log.info("Snapshot:\n%s", snapshot.summary())
+
+    if history is None:
+        # Pull history for the load forecaster. Failure here is fine — builder
+        # has a fallback, we just lose some accuracy.
+        try:
+            history = ha.fetch_history(days=14)
+        except Exception as e:  # noqa: BLE001
+            log.warning("HA history fetch failed (%s); proceeding without", e)
+            history = pd.DataFrame()
 
     # --- Baseline plan ---
     baseline_forecast = build_forecast(snapshot, history)

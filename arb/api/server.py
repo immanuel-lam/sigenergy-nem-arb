@@ -47,6 +47,21 @@ app.add_middleware(
 )
 
 
+@app.on_event("startup")
+async def _warmup_cache() -> None:
+    """Prime the ingest cache in the background so /spike-demo is fast on first click."""
+
+    async def _warm() -> None:
+        try:
+            loop = asyncio.get_event_loop()
+            await loop.run_in_executor(None, _prime_cache)
+            log.info("startup cache warm complete")
+        except Exception as e:  # noqa: BLE001
+            log.warning("startup cache warm failed (non-fatal): %s", e)
+
+    asyncio.create_task(_warm())
+
+
 # ---------------------------------------------------------------------------
 # Serialisation helpers
 # ---------------------------------------------------------------------------
@@ -212,19 +227,42 @@ def plan_current() -> dict:
     return plan_to_dict(plan)
 
 
+# TTL cache for the expensive ingest calls. /plan/refresh warms it; /spike-demo
+# reuses it so the demo button doesn't pay a fresh AEMO + 14-day HA fetch.
+_INGEST_CACHE: dict[str, Any] = {"snapshot": None, "history": None, "at": None}
+_INGEST_TTL_SEC = 120
+
+
+def _cache_fresh() -> bool:
+    at = _INGEST_CACHE["at"]
+    if at is None:
+        return False
+    return (datetime.now(timezone.utc) - at).total_seconds() < _INGEST_TTL_SEC
+
+
+def _prime_cache() -> tuple[Snapshot, pd.DataFrame | None]:
+    """Return (snapshot, history), reusing cached values if fresh."""
+    if _cache_fresh():
+        return _INGEST_CACHE["snapshot"], _INGEST_CACHE["history"]
+    snap = take_snapshot()
+    try:
+        hist = ha.fetch_history(days=14)
+    except Exception as e:  # noqa: BLE001
+        log.warning("HA history fetch failed: %s", e)
+        hist = None
+    _INGEST_CACHE["snapshot"] = snap
+    _INGEST_CACHE["history"] = hist
+    _INGEST_CACHE["at"] = datetime.now(timezone.utc)
+    return snap, hist
+
+
 @app.post("/plan/refresh")
 def plan_refresh() -> dict:
     """Run the read-only critical path: ingest, forecast, schedule, explain."""
     try:
-        snap = take_snapshot()
+        snap, history = _prime_cache()
     except Exception as e:  # noqa: BLE001
         raise HTTPException(status_code=503, detail=f"snapshot failed: {e}")
-
-    try:
-        history = ha.fetch_history(days=14)
-    except Exception as e:  # noqa: BLE001
-        log.warning("HA history fetch failed: %s", e)
-        history = None
 
     previous = loop_mod._load_previous_plan()
     forecast_df = build_forecast(snap, ha_history=history)
@@ -381,6 +419,12 @@ def spike_demo(req: SpikeDemoRequest) -> dict:
     if req.channel not in ("import", "export"):
         raise HTTPException(status_code=400, detail="channel must be 'import' or 'export'")
 
+    # Reuse the cached snapshot/history if /plan/refresh primed it recently.
+    cached_snap, cached_hist = (None, None)
+    if _cache_fresh():
+        cached_snap = _INGEST_CACHE["snapshot"]
+        cached_hist = _INGEST_CACHE["history"]
+
     try:
         result = run_spike_demo(
             magnitude_c_kwh=req.magnitude_c_kwh,
@@ -388,6 +432,8 @@ def spike_demo(req: SpikeDemoRequest) -> dict:
             duration_min=req.duration_min,
             channel=req.channel,  # type: ignore[arg-type]
             skip_llm=not req.use_llm,
+            snapshot=cached_snap,
+            history=cached_hist,
         )
     except Exception as e:  # noqa: BLE001
         raise HTTPException(status_code=503, detail=f"spike demo failed: {e}")
@@ -402,6 +448,7 @@ def spike_demo(req: SpikeDemoRequest) -> dict:
         "spike_start": result.spike_start.isoformat(),
         "spike_end": result.spike_end.isoformat(),
         "spike_c_kwh": float(result.spike_c_kwh),
+        "channel": req.channel,
     }
 
 
