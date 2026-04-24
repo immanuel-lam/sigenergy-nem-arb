@@ -4,7 +4,32 @@
 
 ---
 
-## 0a. STATE AT END OF APR 23 SESSION (read this first on resume)
+## 0a. STATE AT END OF APR 24 EVENING (read this first on resume)
+
+Today was live-bug-squash day. Nothing major rebuilt. Stack runs cleanly end-to-end, 146 tests still green.
+
+**What got fixed today (see `git log` for commits):**
+- **`start.sh` wrapper** — one command boots backend + frontend. Ctrl-C actually kills everything now (pkill by name, no more `wait`-hang on orphaned next-dev workers). Uvicorn runs with `--reload --reload-dir arb` so Python edits hot-reload.
+- **PricePanel null-safety** (`web/components/dashboard/PricePanel.tsx`, `web/hooks/useLiveData.ts`) — `rows[plan.current_idx].ts` crashed the whole page when `current_idx` was `null` (stale plan). Guard now checks `typeof === "number"`. Type corrected to `number | null`.
+- **Amber forecast window** (`arb/ingest/amber.py`) — was hitting `/sites/{id}/prices` which returns today's local midnight-to-midnight only, so a 10pm call got ~2h of forecast. Switched to `/sites/{id}/prices/current?next=288&previous=12` for a rolling 24h that auto-rolls past midnight. Verified live: 71 intervals spanning 24.6h (Amber publishes near-term at 5-min, further-out at 30-min).
+- **Spike demo no longer feels stuck** — backend `/spike-demo` was completing in ~60s (full ingest + double schedule) with no progress feedback, so it read as a hang. Fixes: `_INGEST_CACHE` with 120s TTL in `arb/api/server.py` primed by `/plan/refresh` and reused by `/spike-demo`; new `@app.on_event("startup")` warms the cache in the background on boot (~90s then silent); `run_spike_demo` in `arb/agent/spike_demo.py` accepts optional `snapshot`/`history` params so the endpoint can inject cached values; `apiPost` in `web/lib/api.ts` has a 180s AbortController timeout with a clear error. Second click is now ~72ms.
+- **ReplanMoment spike highlight** (`web/components/replan/ReplanMoment.tsx`) — was doing `timestamps.findIndex(t => t === spike.start_ts)`, but spike timestamps are floored to the minute while plan timestamps have sub-second precision, so the match always failed and the highlight clamped to index 0. New `nearestTsIdx` helper picks the closest by millisecond delta.
+- **`/spike-demo` response** now includes `channel` so `toReplanProps` doesn't have to default it.
+- **UI polling tuned** (`web/hooks/useLiveData.ts`) — `keepPreviousData: true` on every SWR hook so revalidation stops flashing skeletons; slowed intervals (snapshot 10→20s, rationale 15→30s, plan 30→60s, audit 30→60s, health 30→60s). The plan only actually changes every 30 min from the agent loop, so 60s polling was overkill and was triggering full Recharts re-renders of 288-point series.
+- **README "Starting it"** section now documents `./start.sh`.
+
+**Known external issue (not a code bug):** Home Assistant at `homeassistant.lamfamily.cloud` was returning HTTP 521 from Cloudflare ("origin unreachable") during the bug-squash session. All four HA sensors showed `null`/stale in the UI. The dashboard handled it correctly — the `--` readouts are the snapshot correctly marking sensors stale. Immanuel needs to check his HA box or Cloudflare tunnel.
+
+**Still to do (unchanged from Apr 23, Immanuel's hands):**
+1. Record the 3-minute video per `docs/demo_script.md`.
+2. Fill `docs/postmortem_template.md` — candidates in `docs/best_moments.md`.
+3. Submit at https://cerebralvalley.ai/built-with-4-7-hackathon-submissions.
+
+**Do not rebuild features.** System is solid. Record, postmortem, submit.
+
+---
+
+## 0b. STATE AT END OF APR 23 SESSION (previous session)
 
 Context was compacted on **2026-04-23 evening Sydney time**. Here's where we left off.
 
@@ -595,4 +620,4 @@ All Day 1-4 issues done. Kept for reference.
 
 ---
 
-*Last updated: 2026-04-23 afternoon, after Day 4 + stretch features. Day 5 remaining: record video, fill postmortem, submit. 99 tests green. Backend on :8000, dashboard on :3000, advisory-mode loop runs clean against Immanuel's house. Full stack end-to-end verified.*
+*Last updated: 2026-04-24 evening, after live-bug-squash. 146 tests green. `./start.sh` boots both services; Ctrl-C kills cleanly. Spike demo fast after warm, Amber forecast rolling 24h, PricePanel null-safe. HA was unreachable (Cloudflare 521) during the session — user-side infra, not our code. Day 5 remaining: record video, fill postmortem, submit.*

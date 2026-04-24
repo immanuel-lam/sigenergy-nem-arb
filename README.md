@@ -40,13 +40,20 @@ FastAPI backend on port 8000, Next.js dashboard on port 3000. Both read the same
 
 ### Starting it
 
-Two terminals:
+One command:
+
+```bash
+./start.sh
+```
+
+Boots the FastAPI backend on :8000 (with `--reload` watching `arb/`) and the Next.js dashboard on :3000. Ctrl-C stops both cleanly — `pkill` by process name so `next dev` workers can't orphan. Logs go to `.logs/backend.log` and `.logs/frontend.log`. On startup the backend primes its ingest cache in the background, so the first `/spike-demo` click doesn't pay the ~90s AEMO + HA history fetch.
+
+If you'd rather split it yourself:
 
 ```bash
 # Terminal 1 — backend
-cd /path/to/sigenergy-nem-arb
 source .venv/bin/activate
-uvicorn arb.api.server:app --port 8000
+uvicorn arb.api.server:app --port 8000 --reload --reload-dir arb
 
 # Terminal 2 — frontend
 cd web
@@ -96,7 +103,7 @@ Layers don't skip. Ingest returns dataframes. Forecast reads dataframes, returns
 ## Status
 
 Shipped:
-- Ingest: AEMO, Amber (historical + forecast), Open-Meteo, HA REST
+- Ingest: AEMO, Amber (historical + rolling 24h forecast via `/prices/current?next=288&previous=12` so late-night calls don't run out of horizon), Open-Meteo, HA REST
 - Forecast: load day-of-week, solar clear-sky × cloud
 - Scheduler: greedy rank-and-fill with `Plan` SOC trajectory, rate caps, hard SOC bounds
 - Actuator: HA service-call path via `select.plant_remote_ems_control_mode`, audit log, rate limiter (10 writes/hr), SOC hard refuse, `ARB_KILL` switch
